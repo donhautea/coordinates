@@ -1,4 +1,4 @@
-install streamlit folium streamlit-folium
+install folium streamlit-folium
 
 import streamlit as st
 from streamlit_folium import st_folium
