@@ -45,7 +45,7 @@ coord_mode = st.sidebar.radio(
     ("Origin", "Destination"),
 )
 
-# --- Bearing & Distance calculation ------------------------------------------
+# --- Bearing & Distance calculation --------------------------------
 def calculate_bearing(lat1, lon1, lat2, lon2):
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     d_lambda = math.radians(lon2 - lon1)
@@ -54,7 +54,6 @@ def calculate_bearing(lat1, lon1, lat2, lon2):
         math.sin(phi1) * math.cos(phi2) * math.cos(d_lambda)
     return (math.degrees(math.atan2(x, y)) + 360) % 360
 
-# Haversine formula for distance in km
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371  # Earth radius in kilometers
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -80,14 +79,12 @@ if st.session_state.origin and st.session_state.destination:
         st.sidebar.error("Invalid coordinate format. Use 'lat, lon'.")
 
 # --- Build Folium map ---------------------------------------------
-# Determine map center
 try:
     lat0, lon0 = map(float, st.session_state.origin.split(","))
 except ValueError:
     lat0, lon0 = 0, 0
 
 m = folium.Map(location=[lat0, lon0], zoom_start=4)
-# Live mouse coordinates
 MousePosition(
     position="topright",
     separator=" | ",
@@ -96,22 +93,17 @@ MousePosition(
     num_digits=6,
 ).add_to(m)
 
-# Draw line and markers if coords available
 if st.session_state.origin and st.session_state.destination:
     try:
         lat1, lon1 = map(float, st.session_state.origin.split(","))
         lat2, lon2 = map(float, st.session_state.destination.split(","))
-        # Line
         folium.PolyLine(locations=[[lat1, lon1], [lat2, lon2]], weight=3).add_to(m)
-        # Bearings
         b1 = calculate_bearing(lat1, lon1, lat2, lon2)
         b2 = calculate_bearing(lat2, lon2, lat1, lon1)
-        # Origin marker
         folium.Marker(
             [lat1, lon1],
             icon=DivIcon(html=f'<div style="font-weight:bold;color:red;">O: {b1:.2f}°</div>')
         ).add_to(m)
-        # Destination marker
         folium.Marker(
             [lat2, lon2],
             icon=DivIcon(html=f'<div style="font-weight:bold;color:red;">D: {b2:.2f}°</div>')
@@ -132,3 +124,6 @@ if clicked:
     else:
         st.session_state.destination_input = coord_str
         st.session_state.destination = coord_str
+
+    # ← Immediately restart so widgets pick up the new value before re-instantiation
+    st.experimental_rerun()
