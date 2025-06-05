@@ -26,7 +26,7 @@ geolocator = Nominatim(user_agent="geo_app")
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
-    Calculate the great‐circle distance between two points 
+    Calculate the great-circle distance between two points 
     using the Haversine formula (in kilometers).
     """
     R = 6371.0  # Earth radius in km
@@ -55,7 +55,7 @@ def initial_bearing(lat1, lon1, lat2, lon2):
 
 def get_elevation(lat, lon):
     """
-    Query Open‐Elevation API to get elevation (in meters) for the given lat/lon.
+    Query Open-Elevation API to get elevation (in meters) for the given lat/lon.
     Returns None on error.
     """
     try:
@@ -71,7 +71,7 @@ def get_elevation(lat, lon):
 
 def reverse_geocode(lat, lon):
     """
-    Use Nominatim to reverse‐geocode (lat, lon) into a human‐readable address.
+    Use Nominatim to reverse-geocode (lat, lon) into a human-readable address.
     Returns None on failure.
     """
     try:
@@ -93,7 +93,7 @@ st.write(
       - Bearing from Origin → Destination (°)  
       - Bearing from Destination → Origin (°)  
       - Elevation (m)  
-      - Address (reverse‐geocoded)
+      - Address (reverse-geocoded)
 
     All details are summarized in the **sidebar**.
     """
@@ -123,15 +123,19 @@ results = {
 }
 
 # 3) Override destination if actual GPS coordinates are available
-if isinstance(location_data, dict) and "latitude" in location_data:
-    dest_lat = location_data["latitude"]
-    dest_lon = location_data["longitude"]
+dest_lat = None
+dest_lon = None
+
+if isinstance(location_data, dict):
+    dest_lat = location_data.get("latitude")
+    dest_lon = location_data.get("longitude")
+
+if dest_lat is not None and dest_lon is not None:
     results["destination"]["lat"] = dest_lat
     results["destination"]["lon"] = dest_lon
-
     st.success(f"Destination found: {dest_lat:.6f}, {dest_lon:.6f}")
 else:
-    st.info("Using default coordinates for Destination (same as Origin).")
+    st.info("Unable to retrieve destination GPS; using default (origin) coordinates.")
 
 # 4) Compute distance & bearings between origin & destination
 o_lat = results["origin"]["lat"]
@@ -152,7 +156,7 @@ results["bearing_do"] = initial_bearing(d_lat, d_lon, o_lat, o_lon)
 results["origin"]["elevation"] = get_elevation(o_lat, o_lon)
 results["destination"]["elevation"] = get_elevation(d_lat, d_lon)
 
-# 6) Reverse‐geocode addresses
+# 6) Reverse-geocode addresses
 results["origin"]["address"] = reverse_geocode(o_lat, o_lon)
 results["destination"]["address"] = reverse_geocode(d_lat, d_lon)
 
@@ -184,7 +188,8 @@ scatter_layer = pdk.Layer(
     data=df_markers,
     get_position=["longitude", "latitude"],
     get_fill_color=[255, 0, 0, 200],
-    get_radius=100,
+    radiusUnits="pixels",   # Fixed pixel radius to scale with zoom
+    get_radius=6,           # Small fixed radius (in pixels)
     pickable=True,
     auto_highlight=True,
 )
@@ -195,9 +200,10 @@ text_layer = pdk.Layer(
     pickable=False,
     get_position=["longitude", "latitude"],
     get_text="marker",
-    get_color=[0, 0, 0, 255],
+    get_color=[255, 0, 0, 255],   # Red color for “O” and “D”
     get_size=32,
-    get_alignment_baseline="'bottom'"
+    get_alignment_baseline="'bottom'",
+    get_font_weight="'bold'"      # Bold font weight
 )
 
 line_layer = pdk.Layer(
@@ -240,10 +246,11 @@ if results["origin"]["elevation"] is not None:
     st.sidebar.write(f"- **Elevation:** {results['origin']['elevation']:.1f} m")
 else:
     st.sidebar.write("- **Elevation:** N/A")
+
 if results["origin"]["address"]:
     st.sidebar.write(f"- **Address:** {results['origin']['address']}")
 else:
-    st.sidebar.write("- **Address:** N/A")
+    st.sidebar.write("- **Address:** Unable to retrieve")
 
 # Destination summary
 st.sidebar.subheader("Destination (D)")
@@ -252,10 +259,11 @@ if results["destination"]["elevation"] is not None:
     st.sidebar.write(f"- **Elevation:** {results['destination']['elevation']:.1f} m")
 else:
     st.sidebar.write("- **Elevation:** N/A")
+
 if results["destination"]["address"]:
     st.sidebar.write(f"- **Address:** {results['destination']['address']}")
 else:
-    st.sidebar.write("- **Address:** N/A")
+    st.sidebar.write("- **Address:** Unable to retrieve")
 
 # Distance & Bearings
 st.sidebar.subheader("Route Info")
