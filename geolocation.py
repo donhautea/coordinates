@@ -56,7 +56,7 @@ def initial_bearing(lat1, lon1, lat2, lon2):
 def get_elevation(lat, lon):
     """
     Query Open‐Elevation API to get elevation (in meters) for the given lat/lon.
-    Falls back to None on error.
+    Returns None on error.
     """
     try:
         url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}"
@@ -99,10 +99,10 @@ st.write(
     """
 )
 
-# Request user location
+# 1) Get user location (if permission granted)
 location_data = streamlit_geolocation()
 
-# Prepare a structure to hold results
+# 2) Initialize results with default = origin for both origin & destination
 results = {
     "origin": {
         "lat": ORIGIN_LAT,
@@ -111,134 +111,131 @@ results = {
         "address": None,
     },
     "destination": {
-        "lat": None,
-        "lon": None,
+        # Default destination = origin
+        "lat": ORIGIN_LAT,
+        "lon": ORIGIN_LON,
         "elevation": None,
         "address": None,
     },
-    "distance_km": None,
-    "bearing_od": None,     # Origin → Destination
-    "bearing_do": None,     # Destination → Origin
+    "distance_km": 0.0,
+    "bearing_od": 0.0,   # Origin → Destination
+    "bearing_do": 0.0,   # Destination → Origin
 }
 
-# 1) Compute everything if user grants location
+# 3) Override destination if actual GPS coordinates are available
 if isinstance(location_data, dict) and "latitude" in location_data:
     dest_lat = location_data["latitude"]
     dest_lon = location_data["longitude"]
     results["destination"]["lat"] = dest_lat
     results["destination"]["lon"] = dest_lon
 
-    # Distance
-    dist = haversine_distance(ORIGIN_LAT, ORIGIN_LON, dest_lat, dest_lon)
-    results["distance_km"] = dist
-
-    # Bearing Origin → Destination
-    brg_od = initial_bearing(ORIGIN_LAT, ORIGIN_LON, dest_lat, dest_lon)
-    results["bearing_od"] = brg_od
-
-    # Bearing Destination → Origin
-    brg_do = initial_bearing(dest_lat, dest_lon, ORIGIN_LAT, ORIGIN_LON)
-    results["bearing_do"] = brg_do
-
-    # Elevations
-    results["origin"]["elevation"] = get_elevation(ORIGIN_LAT, ORIGIN_LON)
-    results["destination"]["elevation"] = get_elevation(dest_lat, dest_lon)
-
-    # Reverse geocoding
-    results["origin"]["address"] = reverse_geocode(ORIGIN_LAT, ORIGIN_LON)
-    results["destination"]["address"] = reverse_geocode(dest_lat, dest_lon)
-
     st.success(f"Destination found: {dest_lat:.6f}, {dest_lon:.6f}")
 else:
-    st.info("Waiting for you to click the button and grant location permission.")
+    st.info("Using default coordinates for Destination (same as Origin).")
 
-# 2) Build Map (only if destination is known)
-if results["destination"]["lat"] is not None:
+# 4) Compute distance & bearings between origin & destination
+o_lat = results["origin"]["lat"]
+o_lon = results["origin"]["lon"]
+d_lat = results["destination"]["lat"]
+d_lon = results["destination"]["lon"]
 
-    # DataFrame for two markers: origin (O) and destination (D)
-    df_markers = pd.DataFrame([
-        {
-            "name": "Origin (O)",
-            "latitude": results["origin"]["lat"],
-            "longitude": results["origin"]["lon"],
-            "marker": "O"
-        },
-        {
-            "name": "Destination (D)",
-            "latitude": results["destination"]["lat"],
-            "longitude": results["destination"]["lon"],
-            "marker": "D"
-        }
-    ])
+# Distance (km)
+results["distance_km"] = haversine_distance(o_lat, o_lon, d_lat, d_lon)
 
-    # DataFrame for the line connecting O → D
-    df_line = pd.DataFrame([{
-        "start_lat": results["origin"]["lat"],
-        "start_lon": results["origin"]["lon"],
-        "end_lat": results["destination"]["lat"],
-        "end_lon": results["destination"]["lon"]
-    }])
+# Bearing Origin → Destination
+results["bearing_od"] = initial_bearing(o_lat, o_lon, d_lat, d_lon)
 
-    # Pydeck layers
-    scatter_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=df_markers,
-        get_position=["longitude", "latitude"],
-        get_fill_color=[255, 0, 0, 200],
-        get_radius=100,
-        pickable=True,
-        auto_highlight=True,
-    )
+# Bearing Destination → Origin
+results["bearing_do"] = initial_bearing(d_lat, d_lon, o_lat, o_lon)
 
-    text_layer = pdk.Layer(
-        "TextLayer",
-        data=df_markers,
-        pickable=False,
-        get_position=["longitude", "latitude"],
-        get_text="marker",
-        get_color=[0, 0, 0, 255],
-        get_size=32,
-        get_alignment_baseline="'bottom'"
-    )
+# 5) Fetch elevations
+results["origin"]["elevation"] = get_elevation(o_lat, o_lon)
+results["destination"]["elevation"] = get_elevation(d_lat, d_lon)
 
-    line_layer = pdk.Layer(
-        "LineLayer",
-        data=df_line,
-        get_source_position=["start_lon", "start_lat"],
-        get_target_position=["end_lon", "end_lat"],
-        get_color=[0, 128, 255, 200],
-        get_width=4,
-    )
+# 6) Reverse‐geocode addresses
+results["origin"]["address"] = reverse_geocode(o_lat, o_lon)
+results["destination"]["address"] = reverse_geocode(d_lat, d_lon)
 
-    # Center the map on the midpoint
-    mid_lat = (results["origin"]["lat"] + results["destination"]["lat"]) / 2
-    mid_lon = (results["origin"]["lon"] + results["destination"]["lon"]) / 2
+# 7) Build Map (always show at least origin/destination overlap if not actual GPS)
+df_markers = pd.DataFrame([
+    {
+        "name": "Origin (O)",
+        "latitude": o_lat,
+        "longitude": o_lon,
+        "marker": "O"
+    },
+    {
+        "name": "Destination (D)",
+        "latitude": d_lat,
+        "longitude": d_lon,
+        "marker": "D"
+    }
+])
 
-    view_state = pdk.ViewState(
-        latitude=mid_lat,
-        longitude=mid_lon,
-        zoom=5,
-        pitch=0,
-    )
+df_line = pd.DataFrame([{
+    "start_lat": o_lat,
+    "start_lon": o_lon,
+    "end_lat": d_lat,
+    "end_lon": d_lon
+}])
 
-    deck = pdk.Deck(
-        layers=[line_layer, scatter_layer, text_layer],
-        initial_view_state=view_state,
-        tooltip={
-            "html": "<b>{name}</b><br/>Lat: {latitude}<br/>Lon: {longitude}",
-            "style": {"color": "white"},
-        },
-    )
+scatter_layer = pdk.Layer(
+    "ScatterplotLayer",
+    data=df_markers,
+    get_position=["longitude", "latitude"],
+    get_fill_color=[255, 0, 0, 200],
+    get_radius=100,
+    pickable=True,
+    auto_highlight=True,
+)
 
-    st.pydeck_chart(deck)
+text_layer = pdk.Layer(
+    "TextLayer",
+    data=df_markers,
+    pickable=False,
+    get_position=["longitude", "latitude"],
+    get_text="marker",
+    get_color=[0, 0, 0, 255],
+    get_size=32,
+    get_alignment_baseline="'bottom'"
+)
 
+line_layer = pdk.Layer(
+    "LineLayer",
+    data=df_line,
+    get_source_position=["start_lon", "start_lat"],
+    get_target_position=["end_lon", "end_lat"],
+    get_color=[0, 128, 255, 200],
+    get_width=4,
+)
 
-# 3) Sidebar Summary
+mid_lat = (o_lat + d_lat) / 2
+mid_lon = (o_lon + d_lon) / 2
+
+view_state = pdk.ViewState(
+    latitude=mid_lat,
+    longitude=mid_lon,
+    zoom=5,
+    pitch=0,
+)
+
+deck = pdk.Deck(
+    layers=[line_layer, scatter_layer, text_layer],
+    initial_view_state=view_state,
+    tooltip={
+        "html": "<b>{name}</b><br/>Lat: {latitude}<br/>Lon: {longitude}",
+        "style": {"color": "white"},
+    },
+)
+
+st.pydeck_chart(deck)
+
+# 8) Sidebar Summary
 st.sidebar.header("📋 Summary")
 
 # Origin summary
 st.sidebar.subheader("Origin (O)")
-st.sidebar.write(f"- **Coordinates:** {results['origin']['lat']:.6f}, {results['origin']['lon']:.6f}")
+st.sidebar.write(f"- **Coordinates:** {o_lat:.6f}, {o_lon:.6f}")
 if results["origin"]["elevation"] is not None:
     st.sidebar.write(f"- **Elevation:** {results['origin']['elevation']:.1f} m")
 else:
@@ -248,26 +245,20 @@ if results["origin"]["address"]:
 else:
     st.sidebar.write("- **Address:** N/A")
 
-# Destination summary (only if available)
-if results["destination"]["lat"] is not None:
-    st.sidebar.subheader("Destination (D)")
-    st.sidebar.write(
-        f"- **Coordinates:** {results['destination']['lat']:.6f}, {results['destination']['lon']:.6f}"
-    )
-    if results["destination"]["elevation"] is not None:
-        st.sidebar.write(f"- **Elevation:** {results['destination']['elevation']:.1f} m")
-    else:
-        st.sidebar.write("- **Elevation:** N/A")
-    if results["destination"]["address"]:
-        st.sidebar.write(f"- **Address:** {results['destination']['address']}")
-    else:
-        st.sidebar.write("- **Address:** N/A")
-
-    # Distance & Bearings
-    st.sidebar.subheader("Route Info")
-    st.sidebar.write(f"- **Distance:** {results['distance_km']:.3f} km")
-    st.sidebar.write(f"- **Bearing O → D:** {results['bearing_od']:.1f}°")
-    st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
+# Destination summary
+st.sidebar.subheader("Destination (D)")
+st.sidebar.write(f"- **Coordinates:** {d_lat:.6f}, {d_lon:.6f}")
+if results["destination"]["elevation"] is not None:
+    st.sidebar.write(f"- **Elevation:** {results['destination']['elevation']:.1f} m")
 else:
-    st.sidebar.info("No destination data yet. Please grant location permission.")
+    st.sidebar.write("- **Elevation:** N/A")
+if results["destination"]["address"]:
+    st.sidebar.write(f"- **Address:** {results['destination']['address']}")
+else:
+    st.sidebar.write("- **Address:** N/A")
 
+# Distance & Bearings
+st.sidebar.subheader("Route Info")
+st.sidebar.write(f"- **Distance:** {results['distance_km']:.3f} km")
+st.sidebar.write(f"- **Bearing O → D:** {results['bearing_od']:.1f}°")
+st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
