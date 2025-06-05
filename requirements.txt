@@ -1,3 +1,8 @@
 streamlit
 folium
 streamlit-folium
+streamlit-geolocation
+geopy
+requests
+pandas
+pydeck
