@@ -94,10 +94,13 @@ for lbl, v in coords.items():
     ).add_to(m)
 # Plot bearing lines clipped
 def _endpoint(k):
+    # Special case: Point C at 0° always projects north full distance
+    if k == 'C' and bearings[k] == 0:
+        return rotate_bearing(coords[k]["lat"], coords[k]["lon"], 0)
     ends = [i_pts[t] for t in i_pts if k in t]
-    return min(ends, key=lambda x: (x[0]-coords[k]['lat'])**2 + (x[1]-coords[k]['lon'])**2) if ends else rotate_bearing(
-        coords[k]["lat"], coords[k]["lon"], bearings[k]
-    )
+    if ends:
+        return min(ends, key=lambda x: (x[0] - coords[k]['lat'])**2 + (x[1] - coords[k]['lon'])**2)
+    return rotate_bearing(coords[k]["lat"], coords[k]["lon"], bearings[k])
 for k in coords:
     endpt = _endpoint(k)
     folium.PolyLine(
