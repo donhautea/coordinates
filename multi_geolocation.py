@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from oauth2client.service_account import ServiceAccountCredentials
 from geopy.geocoders import Nominatim
@@ -105,11 +105,8 @@ def fetch_latest_user_locations():
 
 df_users = fetch_latest_user_locations()
 
-# --- Determine if recent (≤ 5 minutes old)
-now_dt = datetime.now(PH_TIMEZONE)
-threshold = now_dt - timedelta(minutes=5)
-df_users["is_recent"] = df_users["Timestamp"] >= threshold
-df_users["color"] = df_users["is_recent"].map(lambda recent: [255, 0, 0] if recent else [128, 128, 128])
+# --- Assign red color to all pins
+df_users["color"] = [[255, 0, 0] for _ in range(len(df_users))]
 
 # --- Map layers
 scatter_layer = pdk.Layer(
