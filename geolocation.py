@@ -132,4 +132,42 @@ results["bearing_od"] = initial_bearing(o_lat, o_lon, d_lat, d_lon)
 results["bearing_do"] = initial_bearing(d_lat, d_lon, o_lat, o_lon)
 results["origin"]["elevation"] = get_elevation(o_lat, o_lon)
 results["destination"]["elevation"] = get_elevation(d_lat, d_lon)
-results["origin"]["address"] =
+results["origin"]["address"] = reverse_geocode(o_lat, o_lon)
+results["destination"]["address"] = reverse_geocode(d_lat, d_lon)
+
+# Sidebar Summary
+st.sidebar.header("📋 Summary")
+st.sidebar.subheader("Origin (O)")
+st.sidebar.write(f"- **Coordinates:** {o_lat:.6f}, {o_lon:.6f}")
+st.sidebar.write(f"- **Elevation:** {results['origin']['elevation'] or 'N/A'} m")
+st.sidebar.write(f"- **Address:** {results['origin']['address'] or 'N/A'}")
+
+st.sidebar.subheader("Destination (D)")
+st.sidebar.write(f"- **Coordinates:** {d_lat:.6f}, {d_lon:.6f}")
+st.sidebar.write(f"- **Elevation:** {results['destination']['elevation'] or 'N/A'} m")
+st.sidebar.write(f"- **Address:** {results['destination']['address'] or 'N/A'}")
+
+st.sidebar.subheader("Route Info")
+st.sidebar.write(f"- **Distance:** {results['distance_km']:.3f} km")
+st.sidebar.write(f"- **Bearing O → D:** {results['bearing_od']:.1f}°")
+st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
+
+# Final summary dict
+summary_record = {
+    "Date": datetime.now().strftime("%Y-%m-%d"),
+    "Time": datetime.now().strftime("%H:%M:%S"),
+    "Origin_Lat": o_lat,
+    "Origin_Lon": o_lon,
+    "Origin_Elevation": results['origin']['elevation'],
+    "Origin_Address": results['origin']['address'],
+    "Destination_Lat": d_lat,
+    "Destination_Lon": d_lon,
+    "Destination_Elevation": results['destination']['elevation'],
+    "Destination_Address": results['destination']['address'],
+    "Distance_km": round(results["distance_km"], 3),
+    "Bearing_O_to_D": round(results["bearing_od"], 2),
+    "Bearing_D_to_O": round(results["bearing_do"], 2),
+}
+
+# Append to Google Sheet
+append_to_gdrive(summary_record)
