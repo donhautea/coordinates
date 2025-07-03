@@ -61,6 +61,7 @@ def get_sheet():
         ws.insert_row(headers, 1)
         return ws
 
+
 def append_to_sheet(record):
     sheet = get_sheet()
     headers = sheet.row_values(1)
@@ -72,16 +73,13 @@ def append_to_sheet(record):
 def fetch_latest_locations():
     sheet = get_sheet()
     df = pd.DataFrame(sheet.get_all_records())
-    # Normalize column names
     df.columns = [c.strip() for c in df.columns]
-    # Handle common misspelling
     if "Longtitude" in df.columns:
         df.rename(columns={"Longtitude": "Longitude"}, inplace=True)
     required = {"Email", "Latitude", "Longitude", "Timestamp"}
     if not required.issubset(df.columns):
         return pd.DataFrame()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
-    # Keep most recent per email
     recent = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
     return recent.rename(columns={"Latitude": "lat", "Longitude": "lon"})
 
@@ -92,7 +90,6 @@ st.write("Detect your GPS location and log it by email.")
 data = streamlit_geolocation()
 email = st.text_input("Enter your email:")
 
-# Default center
 center_lat = None
 center_lon = None
 
@@ -120,7 +117,6 @@ if data and email:
 # ------------------------- MAP DISPLAY -------------------------
 df_map = fetch_latest_locations()
 if not df_map.empty:
-    # Center map on user if available; otherwise, center on average
     if center_lat is None or center_lon is None:
         center_lat = df_map["lat"].mean()
         center_lon = df_map["lon"].mean()
