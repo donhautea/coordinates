@@ -14,7 +14,7 @@ st.set_page_config(page_title="📍 Live User Geomap", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 
-# --- Email entry
+# --- Email input
 email = st.text_input("Enter your email (used as ID):")
 if not email:
     st.warning("Please enter your email to proceed.")
@@ -48,7 +48,7 @@ address = reverse_geocode(lat, lon)
 now = datetime.now(PH_TIMEZONE)
 timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# --- Append to Google Sheets
+# --- Append to Google Sheet
 def append_to_sheet(row_dict):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = {
@@ -105,12 +105,13 @@ def fetch_latest_user_locations():
 
 df_users = fetch_latest_user_locations()
 
-# --- Color based on whether update is within last 5 minutes
+# --- Determine if recent (≤ 5 minutes old)
 now_dt = datetime.now(PH_TIMEZONE)
-df_users["is_recent"] = (now_dt - df_users["Timestamp"]) <= timedelta(minutes=5)
+threshold = now_dt - timedelta(minutes=5)
+df_users["is_recent"] = df_users["Timestamp"] >= threshold
 df_users["color"] = df_users["is_recent"].map(lambda recent: [255, 0, 0] if recent else [128, 128, 128])
 
-# --- Map Layers
+# --- Map layers
 scatter_layer = pdk.Layer(
     "ScatterplotLayer",
     data=df_users,
@@ -135,7 +136,7 @@ view_state = pdk.ViewState(
     zoom=12
 )
 
-# --- Display map
+# --- Display Map
 st.pydeck_chart(pdk.Deck(
     layers=[scatter_layer, text_layer],
     initial_view_state=view_state,
