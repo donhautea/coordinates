@@ -10,25 +10,11 @@ from streamlit_geolocation import streamlit_geolocation
 import pydeck as pdk
 
 # --- Config
-st.set_page_config(page_title="📍 Live User Geomap", layout="wide")
+st.set_page_config(page_title="📍 Multi-User Geolocation Map", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 
-# --- Email input
-email = st.text_input("Enter your email (used as ID):")
-if not email:
-    st.warning("Please enter your email to proceed.")
-    st.stop()
-
-# --- Get location
-location_data = streamlit_geolocation()
-if not location_data or not location_data.get("latitude"):
-    st.info("Waiting for GPS trigger...")
-    st.stop()
-
-lat, lon = location_data["latitude"], location_data["longitude"]
-
-# --- Elevation and Address
+# --- Function: get elevation and reverse geocode
 def get_elevation(lat, lon):
     try:
         r = requests.get(f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}")
@@ -42,11 +28,6 @@ def reverse_geocode(lat, lon):
         return loc.address
     except:
         return None
-
-elevation = get_elevation(lat, lon)
-address = reverse_geocode(lat, lon)
-now = datetime.now(PH_TIMEZONE)
-timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
 # --- Append to Google Sheet
 def append_to_sheet(row_dict):
@@ -62,25 +43,12 @@ def append_to_sheet(row_dict):
     }
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(credentials)
-    sheet = gc.open_by_key(st.secrets["gdrive"]["file_id"]).sheet1
+    sheet = gc.open_by_key(st.secrets["gdrive"]["file_id"]).worksheet("multi_geolocator_log")
     headers = sheet.row_values(1)
     row = [row_dict.get(h, "") for h in headers]
     sheet.append_row(row, value_input_option="USER_ENTERED")
 
-summary = {
-    "Email": email,
-    "Date": now.strftime("%Y-%m-%d"),
-    "Time": now.strftime("%H:%M:%S"),
-    "Latitude": lat,
-    "Longitude": lon,
-    "Elevation": elevation,
-    "Address": address,
-    "Timestamp": timestamp_str,
-}
-append_to_sheet(summary)
-st.success("✅ Your location has been logged!")
-
-# --- Fetch latest per email
+# --- Get latest locations from Sheet
 @st.cache_data(ttl=60)
 def fetch_latest_user_locations():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -95,21 +63,53 @@ def fetch_latest_user_locations():
     }
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(credentials)
-    df = pd.DataFrame(gc.open_by_key(st.secrets["gdrive"]["file_id"]).sheet1.get_all_records())
+    sheet = gc.open_by_key(st.secrets["gdrive"]["file_id"]).worksheet("multi_geolocator_log")
+    df = pd.DataFrame(sheet.get_all_records())
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
     df = df.dropna(subset=["Timestamp"])
     df = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
     return df
 
+# --- SECTION: Log current user's location
+with st.expander("📍 Log My Current Location"):
+    email = st.text_input("Enter your email (used as ID):")
+    location_data = streamlit_geolocation()
+
+    if email and location_data and location_data.get("latitude"):
+        lat, lon = location_data["latitude"], location_data["longitude"]
+        elevation = get_elevation(lat, lon)
+        address = reverse_geocode(lat, lon)
+        now = datetime.now(PH_TIMEZONE)
+        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        summary = {
+            "Email": email,
+            "Date": now.strftime("%Y-%m-%d"),
+            "Time": now.strftime("%H:%M:%S"),
+            "Latitude": lat,
+            "Longitude": lon,
+            "Elevation": elevation,
+            "Address": address,
+            "Timestamp": timestamp_str,
+        }
+        append_to_sheet(summary)
+        st.success("✅ Your location has been logged.")
+
+# --- SECTION: Display map
+st.subheader("🗺️ Latest Locations from All Users")
+
 df_users = fetch_latest_user_locations()
 
-# --- Icon image per user (you can customize this mapping)
+# --- Email selector
+selected_email = st.selectbox("Select Email to focus on:", df_users["Email"].unique())
+focus_row = df_users[df_users["Email"] == selected_email].iloc[0]
+
+# --- Assign icons per user
+DEFAULT_ICON_URL = "https://cdn-icons-png.flaticon.com/512/149/149071.png"
 icon_map = {
-    email: "https://cdn-icons-png.flaticon.com/512/149/149071.png"  # use a generic icon
-    for email in df_users["Email"]
+    email: DEFAULT_ICON_URL for email in df_users["Email"]
 }
 
-# --- Create icon columns
 df_users["icon_url"] = df_users["Email"].map(icon_map)
 df_users["icon_data"] = df_users["icon_url"].apply(lambda url: {
     "url": url,
@@ -118,17 +118,26 @@ df_users["icon_data"] = df_users["icon_url"].apply(lambda url: {
     "anchorY": 128
 })
 
-# --- IconLayer
+# --- Map center = selected user
+view_state = pdk.ViewState(
+    latitude=focus_row["Latitude"],
+    longitude=focus_row["Longitude"],
+    zoom=14,
+    pitch=0
+)
+
+# --- Icon Layer
 icon_layer = pdk.Layer(
     "IconLayer",
     data=df_users,
     get_icon="icon_data",
-    get_size=4,
-    size_scale=15,
+    get_size=6,
+    size_scale=20,
     get_position=["Longitude", "Latitude"],
     pickable=True
 )
 
+# --- Text Labels
 text_layer = pdk.Layer(
     "TextLayer",
     data=df_users,
@@ -138,18 +147,12 @@ text_layer = pdk.Layer(
     get_size=14,
 )
 
-# --- View zoomed to user
-view_state = pdk.ViewState(
-    latitude=lat,
-    longitude=lon,
-    zoom=12,
-    pitch=0
-)
-
-# --- Show map
+# --- Google-style basemap using Mapbox
 st.pydeck_chart(pdk.Deck(
     layers=[icon_layer, text_layer],
     initial_view_state=view_state,
+    map_style="mapbox://styles/mapbox/streets-v11",
+    mapbox_key=st.secrets["mapbox_token"],
     tooltip={
         "html": "<b>{Email}</b><br/>Lat: {Latitude}<br/>Lon: {Longitude}<br/>{Timestamp}",
         "style": {"color": "white"}
