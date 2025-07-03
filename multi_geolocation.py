@@ -89,7 +89,6 @@ def fetch_latest_locations():
 st.title("📍 Multi-User Geolocation Tracker with Routes")
 st.write("Detect your GPS location, log it by email, and see routes from the origin.")
 
-# Detect and log location
 data = streamlit_geolocation()
 email = st.text_input("Enter your email:")
 origin_lat, origin_lon = default_origin()
@@ -115,7 +114,6 @@ if data and email:
         st.error("Unable to retrieve GPS location.")
 
 # Fetch and display map
-import pydeck as pdk
 
 df_map = fetch_latest_locations()
 if not df_map.empty:
@@ -123,7 +121,6 @@ if not df_map.empty:
         {"start_lat": origin_lat, "start_lon": origin_lon, "end_lat": row.lat, "end_lon": row.lon}
         for _, row in df_map.iterrows()
     ])
-    # Center map on first user location
     user_view = df_map.iloc[0]
     view = pdk.ViewState(
         latitude=user_view.lat,
@@ -146,7 +143,7 @@ if not df_map.empty:
         get_position="[lon, lat]",
         get_text="Email",
         get_size=12,
-        get_color=[0, 0, 0],
+        get_color=[255, 255, 0],  # Yellow text color
         get_alignment_baseline='"bottom"'
     )
     line = pdk.Layer(
