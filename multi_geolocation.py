@@ -9,7 +9,7 @@ from geopy.geocoders import Nominatim
 from streamlit_geolocation import streamlit_geolocation
 import pydeck as pdk
 
-# --- Config
+# --- App config
 st.set_page_config(page_title="📍 Live User Geomap", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
@@ -80,7 +80,7 @@ summary = {
 append_to_sheet(summary)
 st.success("✅ Your location has been logged!")
 
-# --- Fetch latest user locations
+# --- Fetch latest locations per email
 @st.cache_data(ttl=60)
 def fetch_latest_user_locations():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -99,16 +99,18 @@ def fetch_latest_user_locations():
 
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
     df = df.dropna(subset=["Timestamp"])
+
+    # Get most recent entry per email
     df = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
 
     return df
 
 df_users = fetch_latest_user_locations()
 
-# --- Assign red color to all pins
+# --- Color all pins red
 df_users["color"] = [[255, 0, 0] for _ in range(len(df_users))]
 
-# --- Map layers
+# --- Build map layers
 scatter_layer = pdk.Layer(
     "ScatterplotLayer",
     data=df_users,
@@ -127,13 +129,16 @@ text_layer = pdk.Layer(
     get_size=16,
 )
 
+# --- Zoom to current user
 view_state = pdk.ViewState(
     latitude=lat,
     longitude=lon,
-    zoom=12
+    zoom=12,  # Adjust if you want tighter/wider view
+    pitch=0,
+    bearing=0
 )
 
-# --- Display Map
+# --- Show map
 st.pydeck_chart(pdk.Deck(
     layers=[scatter_layer, text_layer],
     initial_view_state=view_state,
