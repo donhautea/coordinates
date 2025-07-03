@@ -14,7 +14,7 @@ st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 FILE_ID = "1CPXH8IZVGXLzApaQNC2GvTkAETpGGAjQlfJ8SdtBbxc"
-# Fixed central origin (e.g. office) for routing
+
 def default_origin():
     return 14.64171, 121.05078
 
@@ -89,9 +89,9 @@ def fetch_latest_locations():
 st.title("📍 Multi-User Geolocation Tracker with Routes")
 st.write("Detect your GPS location, log it by email, and see routes from the origin.")
 
+# Detect and log location
 data = streamlit_geolocation()
 email = st.text_input("Enter your email:")
-
 origin_lat, origin_lon = default_origin()
 
 if data and email:
@@ -114,15 +114,17 @@ if data and email:
     else:
         st.error("Unable to retrieve GPS location.")
 
-# ------------------------- MAP DISPLAY -------------------------
+# Fetch and display map
+import pydeck as pdk
+
 df_map = fetch_latest_locations()
 if not df_map.empty:
     df_lines = pd.DataFrame([
         {"start_lat": origin_lat, "start_lon": origin_lon, "end_lat": row.lat, "end_lon": row.lon}
         for _, row in df_map.iterrows()
     ])
-    # Determine view based on user location or default origin
-    user_view = df_map.iloc[0]  # Use first user for centering dynamic
+    # Center map on first user location
+    user_view = df_map.iloc[0]
     view = pdk.ViewState(
         latitude=user_view.lat,
         longitude=user_view.lon,
@@ -155,11 +157,11 @@ if not df_map.empty:
         get_color=[0, 128, 255],
         get_width=3
     )
-    st.pydeck_chart(pdk.Deck(
+    deck = pdk.Deck(
         layers=[scatter, text, line],
         initial_view_state=view,
-        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"},
-        use_container_width=True
-    ))
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
+    )
+    st.pydeck_chart(deck, use_container_width=True)
 else:
     st.info("No valid location data to display.")
