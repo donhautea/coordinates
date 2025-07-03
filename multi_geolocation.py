@@ -9,13 +9,13 @@ from geopy.geocoders import Nominatim
 from streamlit_geolocation import streamlit_geolocation
 import pydeck as pdk
 
-# --- App config
+# --- Config
 st.set_page_config(page_title="📍 Live User Geomap", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 
-# --- Email entry (no login needed)
-email = st.text_input("Enter your email (used as ID):", key="user_email")
+# --- Email entry
+email = st.text_input("Enter your email (used as ID):")
 if not email:
     st.warning("Please enter your email to proceed.")
     st.stop()
@@ -28,7 +28,7 @@ if not location_data or not location_data.get("latitude"):
 
 lat, lon = location_data["latitude"], location_data["longitude"]
 
-# --- Elevation and address
+# --- Elevation and Address
 def get_elevation(lat, lon):
     try:
         r = requests.get(f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}")
@@ -48,7 +48,7 @@ address = reverse_geocode(lat, lon)
 now = datetime.now(PH_TIMEZONE)
 timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# --- Save to Google Sheets
+# --- Append to Google Sheets
 def append_to_sheet(row_dict):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = {
@@ -80,7 +80,7 @@ summary = {
 append_to_sheet(summary)
 st.success("✅ Your location has been logged!")
 
-# --- Load latest user pins
+# --- Fetch latest user locations
 @st.cache_data(ttl=60)
 def fetch_latest_user_locations():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -97,24 +97,20 @@ def fetch_latest_user_locations():
     gc = gspread.authorize(credentials)
     df = pd.DataFrame(gc.open_by_key(st.secrets["gdrive"]["file_id"]).sheet1.get_all_records())
 
-    # Ensure Timestamp is a proper Python datetime object
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
     df = df.dropna(subset=["Timestamp"])
-    df["Timestamp"] = df["Timestamp"].apply(pd.Timestamp.to_pydatetime)
-
-    # Get most recent location per email
     df = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
+
     return df
 
 df_users = fetch_latest_user_locations()
 
-# --- Color based on freshness (≤ 5 mins = red, else gray)
+# --- Color based on whether update is within last 5 minutes
 now_dt = datetime.now(PH_TIMEZONE)
-df_users["color"] = df_users["Timestamp"].apply(
-    lambda t: [128, 128, 128] if (now_dt - t > timedelta(minutes=5)) else [255, 0, 0]
-)
+df_users["is_recent"] = (now_dt - df_users["Timestamp"]) <= timedelta(minutes=5)
+df_users["color"] = df_users["is_recent"].map(lambda recent: [255, 0, 0] if recent else [128, 128, 128])
 
-# --- Map layers
+# --- Map Layers
 scatter_layer = pdk.Layer(
     "ScatterplotLayer",
     data=df_users,
@@ -133,7 +129,6 @@ text_layer = pdk.Layer(
     get_size=16,
 )
 
-# --- Initial map view (centered to last logged user)
 view_state = pdk.ViewState(
     latitude=lat,
     longitude=lon,
