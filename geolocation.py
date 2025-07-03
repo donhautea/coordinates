@@ -198,6 +198,7 @@ st.sidebar.write(f"- **Bearing O → D:** {results['bearing_od']:.1f}°")
 st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
 
 # ------------------------- GOOGLE SHEET LOG -------------------------
+# ------------------------- GOOGLE SHEET LOG -------------------------
 summary_record = {
     "Date": datetime.now().strftime("%Y-%m-%d"),
     "Time": datetime.now().strftime("%H:%M:%S"),
@@ -214,4 +215,8 @@ summary_record = {
     "Bearing_D_to_O": round(results["bearing_do"], 2),
 }
 
-append_to_gdrive(summary_record)
+# Only write if D ≠ O
+if round(o_lat, 6) == round(d_lat, 6) and round(o_lon, 6) == round(d_lon, 6):
+    st.info("🛑 Log skipped: Origin and Destination coordinates are identical.")
+else:
+    append_to_gdrive(summary_record)
