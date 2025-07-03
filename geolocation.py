@@ -41,16 +41,15 @@ def get_elevation(lat, lon):
         resp = requests.get(url, timeout=5)
         if resp.status_code == 200:
             return resp.json()["results"][0]["elevation"]
-    except Exception as e:
-        st.warning(f"Elevation API error: {e}")
+    except:
+        pass
     return None
 
 def reverse_geocode(lat, lon):
     try:
         location = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
         return location.address if location else None
-    except Exception as e:
-        st.warning(f"Reverse geocoding error: {e}")
+    except:
         return None
 
 def append_to_gdrive(summary_dict):
@@ -70,25 +69,17 @@ def append_to_gdrive(summary_dict):
 
         file = gc.open_by_key(st.secrets["gdrive"]["file_id"])
         sheet = file.sheet1
-
         headers = sheet.row_values(1)
-        st.write("📋 Google Sheet headers:", headers)
-
         row = [summary_dict.get(col, "") for col in headers]
-        st.write("📝 Row to append:", row)
 
-        if all(cell == "" for cell in row):
-            st.error("❌ All values in the row are empty. Check if headers match the dictionary keys.")
-        else:
+        if any(row):
             sheet.append_row(row, value_input_option="USER_ENTERED")
-            st.success("✅ Successfully appended to Google Sheet.")
+            st.success("✅ Summary successfully logged to Google Sheet.")
+        else:
+            st.error("❌ No valid data to append. Check header alignment with summary record.")
 
-    except gspread.exceptions.APIError as api_err:
-        st.error(f"❌ Google Sheets API error: {api_err}")
-    except KeyError as key_err:
-        st.error(f"❌ Missing key in summary_record: {key_err}")
     except Exception as e:
-        st.error(f"❌ Unexpected error: {e}")
+        st.error(f"❌ Error saving to Google Sheets: {e}")
 
 # ------------------------- MAIN APP -------------------------
 st.title("📍 Origin & Destination Geolocation")
@@ -123,7 +114,7 @@ if dest_lat and dest_lon:
 else:
     st.info("⚠️ Unable to retrieve GPS location. Using origin as fallback.")
 
-# Compute results
+# Compute values
 o_lat, o_lon = results["origin"]["lat"], results["origin"]["lon"]
 d_lat, d_lon = results["destination"]["lat"], results["destination"]["lon"]
 
@@ -152,7 +143,7 @@ st.sidebar.write(f"- **Distance:** {results['distance_km']:.3f} km")
 st.sidebar.write(f"- **Bearing O → D:** {results['bearing_od']:.1f}°")
 st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
 
-# Final summary dict
+# Summary dictionary
 summary_record = {
     "Date": datetime.now().strftime("%Y-%m-%d"),
     "Time": datetime.now().strftime("%H:%M:%S"),
@@ -169,5 +160,5 @@ summary_record = {
     "Bearing_D_to_O": round(results["bearing_do"], 2),
 }
 
-# Append to Google Sheet
+# Log to Google Sheet
 append_to_gdrive(summary_record)
