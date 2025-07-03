@@ -126,7 +126,61 @@ results["destination"]["elevation"] = get_elevation(d_lat, d_lon)
 results["origin"]["address"] = reverse_geocode(o_lat, o_lon)
 results["destination"]["address"] = reverse_geocode(d_lat, d_lon)
 
-# Sidebar Summary
+# ------------------------- MAP (D → O) -------------------------
+df_markers = pd.DataFrame([
+    {"name": "Origin (O)", "latitude": o_lat, "longitude": o_lon, "marker": "O"},
+    {"name": "Destination (D)", "latitude": d_lat, "longitude": d_lon, "marker": "D"},
+])
+
+df_line = pd.DataFrame([{
+    "start_lat": d_lat, "start_lon": d_lon,
+    "end_lat": o_lat, "end_lon": o_lon
+}])
+
+scatter_layer = pdk.Layer(
+    "ScatterplotLayer",
+    data=df_markers,
+    get_position=["longitude", "latitude"],
+    get_fill_color=[255, 0, 0, 200],
+    get_radius=6,
+    pickable=True
+)
+
+text_layer = pdk.Layer(
+    "TextLayer",
+    data=df_markers,
+    get_position=["longitude", "latitude"],
+    get_text="marker",
+    get_color=[255, 0, 0],
+    get_size=32
+)
+
+line_layer = pdk.Layer(
+    "LineLayer",
+    data=df_line,
+    get_source_position=["start_lon", "start_lat"],
+    get_target_position=["end_lon", "end_lat"],
+    get_color=[0, 128, 255],
+    get_width=4
+)
+
+mid_lat = (o_lat + d_lat) / 2
+mid_lon = (o_lon + d_lon) / 2
+
+view_state = pdk.ViewState(latitude=mid_lat, longitude=mid_lon, zoom=5)
+
+deck = pdk.Deck(
+    layers=[line_layer, scatter_layer, text_layer],
+    initial_view_state=view_state,
+    tooltip={
+        "html": "<b>{name}</b><br/>Lat: {latitude}<br/>Lon: {longitude}",
+        "style": {"color": "white"}
+    }
+)
+
+st.pydeck_chart(deck)
+
+# ------------------------- SIDEBAR SUMMARY -------------------------
 st.sidebar.header("📋 Summary")
 st.sidebar.subheader("Origin (O)")
 st.sidebar.write(f"- **Coordinates:** {o_lat:.6f}, {o_lon:.6f}")
@@ -143,7 +197,7 @@ st.sidebar.write(f"- **Distance:** {results['distance_km']:.3f} km")
 st.sidebar.write(f"- **Bearing O → D:** {results['bearing_od']:.1f}°")
 st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
 
-# Summary dictionary
+# ------------------------- GOOGLE SHEET LOG -------------------------
 summary_record = {
     "Date": datetime.now().strftime("%Y-%m-%d"),
     "Time": datetime.now().strftime("%H:%M:%S"),
@@ -160,5 +214,4 @@ summary_record = {
     "Bearing_D_to_O": round(results["bearing_do"], 2),
 }
 
-# Log to Google Sheet
 append_to_gdrive(summary_record)
