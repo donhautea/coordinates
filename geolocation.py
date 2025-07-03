@@ -5,6 +5,7 @@ import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from geopy.geocoders import Nominatim
 import pydeck as pdk
 from streamlit_geolocation import streamlit_geolocation
@@ -199,9 +200,12 @@ st.sidebar.write(f"- **Bearing D → O:** {results['bearing_do']:.1f}°")
 
 # ------------------------- GOOGLE SHEET LOG -------------------------
 # ------------------------- GOOGLE SHEET LOG -------------------------
+# Use Philippine timezone
+ph_time = datetime.now(ZoneInfo("Asia/Manila"))
+
 summary_record = {
-    "Date": datetime.now().strftime("%Y-%m-%d"),
-    "Time": datetime.now().strftime("%H:%M:%S"),
+    "Date": ph_time.strftime("%Y-%m-%d"),
+    "Time": ph_time.strftime("%H:%M:%S"),
     "Origin_Lat": o_lat,
     "Origin_Lon": o_lon,
     "Origin_Elevation": results['origin']['elevation'],
