@@ -9,7 +9,7 @@ from geopy.geocoders import Nominatim
 from streamlit_geolocation import streamlit_geolocation
 import pydeck as pdk
 
-# --- App config
+# --- Config
 st.set_page_config(page_title="📍 Live User Geomap", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
@@ -80,7 +80,7 @@ summary = {
 append_to_sheet(summary)
 st.success("✅ Your location has been logged!")
 
-# --- Fetch latest locations per email
+# --- Fetch latest per email
 @st.cache_data(ttl=60)
 def fetch_latest_user_locations():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -96,27 +96,36 @@ def fetch_latest_user_locations():
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(credentials)
     df = pd.DataFrame(gc.open_by_key(st.secrets["gdrive"]["file_id"]).sheet1.get_all_records())
-
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
     df = df.dropna(subset=["Timestamp"])
-
-    # Get most recent entry per email
     df = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
-
     return df
 
 df_users = fetch_latest_user_locations()
 
-# --- Color all pins red
-df_users["color"] = [[255, 0, 0] for _ in range(len(df_users))]
+# --- Icon image per user (you can customize this mapping)
+icon_map = {
+    email: "https://cdn-icons-png.flaticon.com/512/149/149071.png"  # use a generic icon
+    for email in df_users["Email"]
+}
 
-# --- Build map layers
-scatter_layer = pdk.Layer(
-    "ScatterplotLayer",
+# --- Create icon columns
+df_users["icon_url"] = df_users["Email"].map(icon_map)
+df_users["icon_data"] = df_users["icon_url"].apply(lambda url: {
+    "url": url,
+    "width": 128,
+    "height": 128,
+    "anchorY": 128
+})
+
+# --- IconLayer
+icon_layer = pdk.Layer(
+    "IconLayer",
     data=df_users,
+    get_icon="icon_data",
+    get_size=4,
+    size_scale=15,
     get_position=["Longitude", "Latitude"],
-    get_fill_color="color",
-    get_radius=60,
     pickable=True
 )
 
@@ -126,21 +135,20 @@ text_layer = pdk.Layer(
     get_position=["Longitude", "Latitude"],
     get_text="Email",
     get_color=[0, 0, 0],
-    get_size=16,
+    get_size=14,
 )
 
-# --- Zoom to current user
+# --- View zoomed to user
 view_state = pdk.ViewState(
     latitude=lat,
     longitude=lon,
-    zoom=12,  # Adjust if you want tighter/wider view
-    pitch=0,
-    bearing=0
+    zoom=12,
+    pitch=0
 )
 
 # --- Show map
 st.pydeck_chart(pdk.Deck(
-    layers=[scatter_layer, text_layer],
+    layers=[icon_layer, text_layer],
     initial_view_state=view_state,
     tooltip={
         "html": "<b>{Email}</b><br/>Lat: {Latitude}<br/>Lon: {Longitude}<br/>{Timestamp}",
