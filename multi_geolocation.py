@@ -74,7 +74,8 @@ navigator.geolocation.getCurrentPosition(
 """, height=0)
 
 # Hidden field for location (filled by JS)
-coordinates = location_placeholder.text_area("Your Coordinates (auto-filled)", key="coords", height=50)
+coordinates = location_placeholder.text_area("Your Coordinates (auto-filled)", key="coords", height=70)
+
 
 submit = st.button("📌 Submit Location")
 
