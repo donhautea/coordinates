@@ -9,12 +9,12 @@ from geopy.geocoders import Nominatim
 from streamlit_geolocation import streamlit_geolocation
 import pydeck as pdk
 
-# --- Config
+# --- App config
 st.set_page_config(page_title="📍 Live User Geomap", layout="wide")
-geolocator = Nominatim(user_agent="geo_app")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
+geolocator = Nominatim(user_agent="geo_app")
 
-# --- User Email (no-password)
+# --- Email entry (no login needed)
 email = st.text_input("Enter your email (used as ID):", key="user_email")
 if not email:
     st.warning("Please enter your email to proceed.")
@@ -28,7 +28,7 @@ if not location_data or not location_data.get("latitude"):
 
 lat, lon = location_data["latitude"], location_data["longitude"]
 
-# --- Elevation & Address
+# --- Elevation and address
 def get_elevation(lat, lon):
     try:
         r = requests.get(f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}")
@@ -46,9 +46,9 @@ def reverse_geocode(lat, lon):
 elevation = get_elevation(lat, lon)
 address = reverse_geocode(lat, lon)
 now = datetime.now(PH_TIMEZONE)
-timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# --- Append to Google Sheet
+# --- Save to Google Sheets
 def append_to_sheet(row_dict):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = {
@@ -75,15 +75,16 @@ summary = {
     "Longitude": lon,
     "Elevation": elevation,
     "Address": address,
-    "Timestamp": timestamp,
+    "Timestamp": timestamp_str,
 }
 append_to_sheet(summary)
-st.success("✅ Location logged!")
+st.success("✅ Your location has been logged!")
 
-# --- Fetch latest locations from all users
+# --- Load latest user pins
 @st.cache_data(ttl=60)
 def fetch_latest_user_locations():
-    creds = ServiceAccountCredentials.from_json_keyfile_dict({
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_dict = {
         "type": "service_account",
         "project_id": "dummy-id",
         "private_key_id": "dummy",
@@ -91,21 +92,30 @@ def fetch_latest_user_locations():
         "client_email": st.secrets["gdrive"]["client_email"],
         "client_id": st.secrets["gdrive"]["client_id"],
         "token_uri": st.secrets["gdrive"]["token_uri"]
-    }, ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"])
-    gc = gspread.authorize(creds)
+    }
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    gc = gspread.authorize(credentials)
     df = pd.DataFrame(gc.open_by_key(st.secrets["gdrive"]["file_id"]).sheet1.get_all_records())
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-    return df.sort_values("Timestamp").groupby("Email").tail(1)
+
+    # Ensure Timestamp is a proper Python datetime object
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+    df = df.dropna(subset=["Timestamp"])
+    df["Timestamp"] = df["Timestamp"].apply(pd.Timestamp.to_pydatetime)
+
+    # Get most recent location per email
+    df = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
+    return df
 
 df_users = fetch_latest_user_locations()
 
-# --- Map Layer (gray if older than 5 mins)
+# --- Color based on freshness (≤ 5 mins = red, else gray)
 now_dt = datetime.now(PH_TIMEZONE)
 df_users["color"] = df_users["Timestamp"].apply(
     lambda t: [128, 128, 128] if (now_dt - t > timedelta(minutes=5)) else [255, 0, 0]
 )
 
-layer = pdk.Layer(
+# --- Map layers
+scatter_layer = pdk.Layer(
     "ScatterplotLayer",
     data=df_users,
     get_position=["Longitude", "Latitude"],
@@ -123,14 +133,19 @@ text_layer = pdk.Layer(
     get_size=16,
 )
 
+# --- Initial map view (centered to last logged user)
 view_state = pdk.ViewState(
     latitude=lat,
     longitude=lon,
-    zoom=11
+    zoom=12
 )
 
+# --- Display map
 st.pydeck_chart(pdk.Deck(
-    layers=[layer, text_layer],
+    layers=[scatter_layer, text_layer],
     initial_view_state=view_state,
-    tooltip={"html": "<b>{Email}</b><br/>Lat: {Latitude}<br/>Lon: {Longitude}<br/>{Timestamp}", "style": {"color": "white"}}
+    tooltip={
+        "html": "<b>{Email}</b><br/>Lat: {Latitude}<br/>Lon: {Longitude}<br/>{Timestamp}",
+        "style": {"color": "white"}
+    }
 ))
