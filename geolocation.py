@@ -93,7 +93,7 @@ It computes:
 - Bearings  
 - Elevation  
 - Reverse-Geocoded Address  
-Then saves the result to Google Sheets.
+Then saves the result to Server.
 """)
 
 location_data = streamlit_geolocation()
