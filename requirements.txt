@@ -1,8 +1,8 @@
 streamlit
-folium
-streamlit-folium
 streamlit-geolocation
-geopy
-requests
+gspread
+oauth2client
 pandas
+requests
+geopy
 pydeck
