@@ -74,7 +74,7 @@ def append_to_gdrive(summary_dict):
 
         if any(row):
             sheet.append_row(row, value_input_option="USER_ENTERED")
-            st.success("✅ Summary successfully logged to Google Sheet.")
+            st.success("✅ Summary successfully logged to Server.")
         else:
             st.error("❌ No valid data to append. Check header alignment with summary record.")
 
