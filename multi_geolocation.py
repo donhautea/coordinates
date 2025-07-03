@@ -6,10 +6,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 
-# ---------------- CONFIG ----------------
 st.set_page_config(page_title="📍 Multi-User Geolocation", layout="wide")
 
-# ---------------- GOOGLE SHEETS ACCESS ----------------
+# ---------------- GOOGLE SHEETS AUTH ----------------
 @st.cache_resource
 def get_worksheet():
     scope = [
@@ -41,7 +40,7 @@ def fetch_latest_user_locations():
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     if "Timestamp" not in df.columns:
-        st.error("🛑 'Timestamp' column missing in Google Sheet.")
+        st.error("🛑 'Timestamp' column missing.")
         st.stop()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
     return df
@@ -49,69 +48,79 @@ def fetch_latest_user_locations():
 # ---------------- UI ----------------
 st.title("📍 Multi-User Geolocation Tracker")
 
-email = st.text_input("Enter your email")
+email = st.text_input("Enter your email address to log your location:")
 
-# Geolocation JavaScript → fetch and return to Streamlit
-geoloc = st.button("📍 Detect My Location")
-if geoloc:
-    components.html("""
-        <script>
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                const coords = pos.coords;
-                const streamlitEvent = new CustomEvent("streamlit:location", {
-                    detail: { lat: coords.latitude, lon: coords.longitude }
-                });
-                window.dispatchEvent(streamlitEvent);
-            },
-            (err) => alert("Failed to get location: " + err.message)
-        );
-        </script>
-    """, height=0)
+get_location = st.button("📍 Detect and Log My Current Location")
 
-# Placeholders for coordinates
-lat_holder = st.empty()
-lon_holder = st.empty()
-lat = lat_holder.number_input("Latitude", key="lat_input", format="%.6f")
-lon = lon_holder.number_input("Longitude", key="lon_input", format="%.6f")
+location_placeholder = st.empty()
 
-# JS → Python: capture location from browser
+# Location JS Script
 components.html("""
 <script>
-window.addEventListener("streamlit:location", function(e) {
-    const coords = e.detail;
-    const inputLat = window.parent.document.querySelector('[data-testid="stNumberInput"] input[name="lat_input"]');
-    const inputLon = window.parent.document.querySelector('[data-testid="stNumberInput"] input[name="lon_input"]');
-    if (inputLat && inputLon) {
-        inputLat.value = coords.lat;
-        inputLat.dispatchEvent(new Event('input', { bubbles: true }));
-        inputLon.value = coords.lon;
-        inputLon.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-});
+navigator.geolocation.getCurrentPosition(
+    (position) => {
+        const coords = position.coords;
+        const lat = coords.latitude;
+        const lon = coords.longitude;
+        const input = window.parent.document.querySelector('textarea[data-testid="stTextArea"]');
+        if (input) {
+            input.value = lat + "," + lon;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+    },
+    (err) => alert("Location access denied: " + err.message)
+);
 </script>
 """, height=0)
 
-submit = st.button("Log My Location")
+# Hidden field for location (filled by JS)
+coordinates = location_placeholder.text_area("Your Coordinates (auto-filled)", key="coords", height=50)
+
+submit = st.button("📌 Submit Location")
+
 if submit:
-    if email and lat and lon:
-        timestamp = datetime.now(ZoneInfo("Asia/Manila"))
-        record = {
-            "Email": email,
-            "Timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "Latitude": lat,
-            "Longitude": lon,
-            "Address": ""
-        }
-        append_to_sheet(record)
-        st.success("✅ Location logged.")
+    if not email:
+        st.warning("⚠️ Please enter your email.")
+    elif not coordinates or "," not in coordinates:
+        st.warning("⚠️ Coordinates not yet detected.")
     else:
-        st.warning("⚠️ Fill in all fields or click 📍 Detect Location first.")
+        try:
+            lat, lon = map(float, coordinates.strip().split(","))
+            now = datetime.now(ZoneInfo("Asia/Manila"))
+
+            # Check if this location is the same as last log
+            df_check = fetch_latest_user_locations()
+            latest = df_check[df_check["Email"] == email].sort_values("Timestamp", ascending=False).head(1)
+            if not latest.empty:
+                last_lat = latest.iloc[0]["Latitude"]
+                last_lon = latest.iloc[0]["Longitude"]
+                if abs(lat - last_lat) < 1e-6 and abs(lon - last_lon) < 1e-6:
+                    st.info("ℹ️ Same location already logged. Skipping entry.")
+                else:
+                    append_to_sheet({
+                        "Email": email,
+                        "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Latitude": lat,
+                        "Longitude": lon,
+                        "Address": ""
+                    })
+                    st.success("✅ Location logged.")
+            else:
+                append_to_sheet({
+                    "Email": email,
+                    "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "Latitude": lat,
+                    "Longitude": lon,
+                    "Address": ""
+                })
+                st.success("✅ Location logged.")
+        except Exception as e:
+            st.error(f"❌ Error parsing coordinates: {e}")
 
 # ---------------- MAP ----------------
-if st.checkbox("🗺 Show All Logged Locations"):
-    df = fetch_latest_user_locations()
-    if not df.empty:
-        st.map(df.rename(columns={"Latitude": "lat", "Longitude": "lon"}))
+if st.checkbox("🗺 Show all user locations"):
+    df_map = fetch_latest_user_locations()
+    if not df_map.empty:
+        st.map(df_map.rename(columns={"Latitude": "lat", "Longitude": "lon"}))
     else:
-        st.info("ℹ️ No data logged yet.")
+        st.info("ℹ️ No location logs found.")
