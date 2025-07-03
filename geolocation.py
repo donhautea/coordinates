@@ -14,6 +14,9 @@ st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 FILE_ID = "1CPXH8IZVGXLzApaQNC2GvTkAETpGGAjQlfJ8SdtBbxc"
+# Fixed central origin (e.g. office) for routing
+default_origin():
+    return 14.64171, 121.05078
 
 # ------------------------- HELPERS -------------------------
 def get_elevation(lat, lon):
@@ -61,7 +64,6 @@ def get_sheet():
         ws.insert_row(headers, 1)
         return ws
 
-
 def append_to_sheet(record):
     sheet = get_sheet()
     headers = sheet.row_values(1)
@@ -84,20 +86,18 @@ def fetch_latest_locations():
     return recent.rename(columns={"Latitude": "lat", "Longitude": "lon"})
 
 # ------------------------- MAIN APP -------------------------
-st.title("📍 Multi-User Geolocation Tracker")
-st.write("Detect your GPS location and log it by email.")
+st.title("📍 Multi-User Geolocation Tracker with Routes")
+st.write("Detect your GPS location, log it by email, and see routes from the origin.")
 
 data = streamlit_geolocation()
 email = st.text_input("Enter your email:")
 
-center_lat = None
-center_lon = None
+origin_lat, origin_lon = default_origin()
 
 if data and email:
     lat = data.get("latitude")
     lon = data.get("longitude")
     if lat is not None and lon is not None:
-        center_lat, center_lon = lat, lon
         now = datetime.now(PH_TIMEZONE)
         elev = get_elevation(lat, lon)
         addr = reverse_geocode(lat, lon)
@@ -117,14 +117,15 @@ if data and email:
 # ------------------------- MAP DISPLAY -------------------------
 df_map = fetch_latest_locations()
 if not df_map.empty:
-    if center_lat is None or center_lon is None:
-        center_lat = df_map["lat"].mean()
-        center_lon = df_map["lon"].mean()
-
+    # Build route lines from origin to each user
+    df_lines = pd.DataFrame([
+        {"start_lat": origin_lat, "start_lon": origin_lon, "end_lat": row.lat, "end_lon": row.lon}
+        for _, row in df_map.iterrows()
+    ])
     view = pdk.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=12
+        latitude=origin_lat,
+        longitude=origin_lon,
+        zoom=10
     )
     scatter = pdk.Layer(
         "ScatterplotLayer",
@@ -143,8 +144,16 @@ if not df_map.empty:
         get_color=[0, 0, 0],
         get_alignment_baseline='"bottom"'
     )
+    line = pdk.Layer(
+        "LineLayer",
+        data=df_lines,
+        get_source_position=["start_lon", "start_lat"],
+        get_target_position=["end_lon", "end_lat"],
+        get_color=[0, 128, 255],
+        get_width=4
+    )
     st.pydeck_chart(pdk.Deck(
-        layers=[scatter, text],
+        layers=[scatter, text, line],
         initial_view_state=view,
         tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
     ))
