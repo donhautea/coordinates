@@ -1,127 +1,148 @@
 import streamlit as st
 import pandas as pd
+import math
+import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import streamlit.components.v1 as components
+from geopy.geocoders import Nominatim
+import pydeck as pdk
+from streamlit_geolocation import streamlit_geolocation
 
-st.set_page_config(page_title="📍 Multi-User Geolocation", layout="wide")
+# ------------------------- CONFIG -------------------------
+st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
 
-# ---------------- GOOGLE SHEETS AUTH ----------------
-@st.cache_resource
-def get_worksheet():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds_dict = st.secrets["gdrive"]
-    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    gc = gspread.authorize(creds)
+ORIGIN_LAT = 14.64171
+ORIGIN_LON = 121.05078
+geolocator = Nominatim(user_agent="geo_app")
+
+# ------------------------- HELPERS -------------------------
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    Δφ = math.radians(lat2 - lat1)
+    Δλ = math.radians(lon2 - lon1)
+    a = math.sin(Δφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(Δλ / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def initial_bearing(lat1, lon1, lat2, lon2):
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    Δλ = math.radians(lon2 - lon1)
+    x = math.sin(Δλ) * math.cos(φ2)
+    y = math.cos(φ1) * math.sin(φ2) - math.sin(φ1) * math.cos(φ2) * math.cos(Δλ)
+    θ = math.degrees(math.atan2(x, y))
+    return (θ + 360) % 360
+
+def get_elevation(lat, lon):
     try:
-        return gc.open_by_key(creds_dict["file_id"]).worksheet("multi_geolocator_log")
-    except gspread.WorksheetNotFound:
-        st.warning("⚠️ 'multi_geolocator_log' not found. Using first worksheet.")
-        return gc.open_by_key(creds_dict["file_id"]).sheet1
+        url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            return resp.json()["results"][0]["elevation"]
+    except:
+        pass
+    return None
 
-def append_to_sheet(entry: dict):
+def reverse_geocode(lat, lon):
+    try:
+        location = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
+        return location.address if location else None
+    except:
+        return None
+
+def get_worksheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_dict = {
+        "type": "service_account",
+        "project_id": "geolocator-bearing",
+        "private_key_id": st.secrets["gdrive"]["private_key_id"],
+        "private_key": st.secrets["gdrive"]["private_key"].replace('\\n', '\n'),
+        "client_email": st.secrets["gdrive"]["client_email"],
+        "client_id": st.secrets["gdrive"]["client_id"],
+        "token_uri": st.secrets["gdrive"]["token_uri"]
+    }
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    gc = gspread.authorize(credentials)
+    file = gc.open_by_key(st.secrets["gdrive"]["file_id"])
+    try:
+        return file.worksheet("multi_geolocator_log")
+    except:
+        st.warning("⚠️ 'multi_geolocator_log' not found. Using first worksheet.")
+        return file.sheet1
+
+def append_to_sheet(record):
     sheet = get_worksheet()
     headers = sheet.row_values(1)
-    if not headers:
-        headers = list(entry.keys())
-        sheet.insert_row(headers, index=1)
-    row = [entry.get(h, "") for h in headers]
-    sheet.append_row(row, value_input_option="USER_ENTERED")
+    row = [record.get(col, "") for col in headers]
+    if any(row):
+        sheet.append_row(row, value_input_option="USER_ENTERED")
 
-@st.cache_data(ttl=60)
 def fetch_latest_user_locations():
     sheet = get_worksheet()
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    if "Timestamp" not in df.columns:
-        st.error("🛑 'Timestamp' column missing.")
-        st.stop()
+    df = pd.DataFrame(sheet.get_all_records())
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
-    return df
+    df = df.sort_values("Timestamp").dropna(subset=["Email"])
+    return df.groupby("Email").tail(1)
 
-# ---------------- UI ----------------
+# ------------------------- MAIN APP -------------------------
 st.title("📍 Multi-User Geolocation Tracker")
+st.write("Automatically detect and plot each user's latest location on the map with icons.")
 
-email = st.text_input("Enter your email address to log your location:")
+user_data = streamlit_geolocation()
+email = st.text_input("Enter your email to tag your location:")
 
-get_location = st.button("📍 Detect and Log My Current Location")
+if user_data and email:
+    ph_time = datetime.now(ZoneInfo("Asia/Manila"))
+    lat = user_data.get("latitude")
+    lon = user_data.get("longitude")
+    if lat and lon:
+        elevation = get_elevation(lat, lon)
+        address = reverse_geocode(lat, lon)
 
-location_placeholder = st.empty()
-
-# Location JS Script
-components.html("""
-<script>
-navigator.geolocation.getCurrentPosition(
-    (position) => {
-        const coords = position.coords;
-        const lat = coords.latitude;
-        const lon = coords.longitude;
-        const input = window.parent.document.querySelector('textarea[data-testid="stTextArea"]');
-        if (input) {
-            input.value = lat + "," + lon;
-            input.dispatchEvent(new Event("input", { bubbles: true }));
+        record = {
+            "Timestamp": ph_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "Email": email,
+            "Latitude": lat,
+            "Longitude": lon,
+            "Elevation": elevation,
+            "Address": address
         }
-    },
-    (err) => alert("Location access denied: " + err.message)
-);
-</script>
-""", height=0)
+        append_to_sheet(record)
+        st.success("📌 Location logged successfully!")
 
-# Hidden field for location (filled by JS)
-coordinates = location_placeholder.text_area("Your Coordinates (auto-filled)", key="coords", height=70)
-
-
-submit = st.button("📌 Submit Location")
-
-if submit:
-    if not email:
-        st.warning("⚠️ Please enter your email.")
-    elif not coordinates or "," not in coordinates:
-        st.warning("⚠️ Coordinates not yet detected.")
-    else:
-        try:
-            lat, lon = map(float, coordinates.strip().split(","))
-            now = datetime.now(ZoneInfo("Asia/Manila"))
-
-            # Check if this location is the same as last log
-            df_check = fetch_latest_user_locations()
-            latest = df_check[df_check["Email"] == email].sort_values("Timestamp", ascending=False).head(1)
-            if not latest.empty:
-                last_lat = latest.iloc[0]["Latitude"]
-                last_lon = latest.iloc[0]["Longitude"]
-                if abs(lat - last_lat) < 1e-6 and abs(lon - last_lon) < 1e-6:
-                    st.info("ℹ️ Same location already logged. Skipping entry.")
-                else:
-                    append_to_sheet({
-                        "Email": email,
-                        "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Latitude": lat,
-                        "Longitude": lon,
-                        "Address": ""
-                    })
-                    st.success("✅ Location logged.")
-            else:
-                append_to_sheet({
-                    "Email": email,
-                    "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Latitude": lat,
-                    "Longitude": lon,
-                    "Address": ""
-                })
-                st.success("✅ Location logged.")
-        except Exception as e:
-            st.error(f"❌ Error parsing coordinates: {e}")
-
-# ---------------- MAP ----------------
-if st.checkbox("🗺 Show all user locations"):
-    df_map = fetch_latest_user_locations()
-    if not df_map.empty:
-        st.map(df_map.rename(columns={"Latitude": "lat", "Longitude": "lon"}))
-    else:
-        st.info("ℹ️ No location logs found.")
+# ------------------------- MAP -------------------------
+df_users = fetch_latest_user_locations()
+if not df_users.empty:
+    df_map = df_users.rename(columns={"Latitude": "lat", "Longitude": "lon"})
+    view = pdk.ViewState(
+        latitude=df_map["lat"].mean(),
+        longitude=df_map["lon"].mean(),
+        zoom=10
+    )
+    scatter = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_map,
+        get_position="[lon, lat]",
+        get_fill_color="[255, 0, 0]",
+        get_radius=60,
+        pickable=True
+    )
+    text = pdk.Layer(
+        "TextLayer",
+        data=df_map,
+        get_position="[lon, lat]",
+        get_text="Email",
+        get_size=18,
+        get_color=[0, 0, 0],
+        get_alignment_baseline='"bottom"'
+    )
+    deck = pdk.Deck(
+        layers=[scatter, text],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}", "style": {"color": "white"}}
+    )
+    st.pydeck_chart(deck)
+else:
+    st.info("📭 No user location data available to display on map.")
