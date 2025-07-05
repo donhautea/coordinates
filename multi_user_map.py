@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from geopy.geocoders import Nominatim
 import pydeck as pdk
 from streamlit_geolocation import streamlit_geolocation
+import math
 
 # ------------------------- CONFIG -------------------------
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
@@ -18,7 +19,7 @@ FILE_ID = st.secrets["gdrive"]["file_id"]
 
 # ------------------------- HELPERS -------------------------
 def default_origin():
-    return 14.3650679146823, 120.890941478913
+    return 14.64171, 121.05078
 
 def get_elevation(lat, lon):
     try:
@@ -36,6 +37,14 @@ def reverse_geocode(lat, lon):
     except:
         return None
 
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
+    return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
 # ------------------------- GOOGLE SHEET -------------------------
 @st.cache_resource
 def get_sheet():
@@ -47,7 +56,7 @@ def get_sheet():
         "type": st.secrets["gdrive"]["type"],
         "project_id": st.secrets["gdrive"]["project_id"],
         "private_key_id": st.secrets["gdrive"]["private_key_id"],
-        "private_key": st.secrets["gdrive"]["private_key"].replace('\\n', '\n'),
+        "private_key": st.secrets["gdrive"]["private_key"].replace('\n', '\n'),
         "client_email": st.secrets["gdrive"]["client_email"],
         "client_id": st.secrets["gdrive"]["client_id"],
         "auth_uri": st.secrets["gdrive"]["auth_uri"],
@@ -100,18 +109,23 @@ with st.sidebar:
     show_public = st.checkbox("Also show public users", value=True)
     sos = st.checkbox("🚨 Emergency Mode (SOS)")
 
+origin_lat, origin_lon = default_origin()
+
+# Manual Refresh Button
 if st.button("📍 Refresh My Location"):
     st.session_state["streamlit_geolocation"] = None
 
+# Auto detect GPS
 data = streamlit_geolocation()
-origin_lat, origin_lon = default_origin()
 
+# Log to sheet
 if data and email:
     lat = data.get("latitude")
     lon = data.get("longitude")
     if lat is not None and lon is not None:
         now = datetime.now(PH_TIMEZONE)
         elev = get_elevation(lat, lon)
+        distance_km = round(haversine(origin_lat, origin_lon, lat, lon), 2)
         record = {
             "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
             "Email": email,
@@ -123,18 +137,24 @@ if data and email:
             "SOS": "YES" if sos else ""
         }
         append_to_sheet(record)
+        with st.sidebar:
+            st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
+            st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
         st.success("📌 Location logged.")
     else:
         st.warning("⚠️ GPS not available.")
 else:
     st.info("Please allow GPS access and enter your email.")
 
+# Display map
 df_map = fetch_latest_locations()
 if not df_map.empty:
     if mode == "Private":
         df_map = df_map[((df_map["Mode"] == "Public") & show_public) | (df_map["SharedCode"] == shared_code)]
-    else:
+    elif mode == "Public":
         df_map = df_map[df_map["Mode"] == "Public"]
+
+    df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
 
     df_map["Color"] = df_map.apply(
         lambda row: [255, 0, 0] if row["SOS"] == "YES"
@@ -178,7 +198,7 @@ if not df_map.empty:
     deck = pdk.Deck(
         layers=[scatter, text, line],
         initial_view_state=view,
-        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Mode: {Mode}<br/>SOS: {SOS}"}
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
     )
     st.pydeck_chart(deck, use_container_width=True)
 else:
