@@ -118,4 +118,83 @@ if email and data:
             "Elevation": elev,
             "Address": addr,
             "Mode": "SOS" if sos else mode,
-            "SharedCode"
+            "SharedCode": share_code,
+            "SOS": "Yes" if sos else "No"
+        }
+        append_to_sheet(record)
+        st.success("📌 Location logged!")
+    else:
+        st.error("GPS location unavailable.")
+
+# Show map
+df_map = fetch_latest_locations()
+if not df_map.empty:
+    # Filter visibility
+    if sos or mode == "Public":
+        visible = df_map[df_map["Mode"].isin(["Public", "SOS"])]
+    else:
+        visible = df_map[(df_map["SharedCode"] == share_code) | (df_map["Mode"] == "Public") | (df_map["Mode"] == "SOS")]
+
+    # Lines
+    df_lines = pd.DataFrame([{
+        "start_lat": origin_lat,
+        "start_lon": origin_lon,
+        "end_lat": row.lat,
+        "end_lon": row.lon
+    } for _, row in visible.iterrows()])
+
+    # Color logic
+    def get_color(row):
+        if row["SOS"] == "Yes":
+            return [255, 0, 0]      # Red = SOS
+        if row["Mode"] == "Public":
+            return [255, 255, 0]    # Yellow = public
+        if not row["Active"]:
+            return [128, 128, 128]  # Gray = inactive
+        return [0, 255, 0]          # Green = active
+
+    visible["color"] = visible.apply(get_color, axis=1)
+
+    # View
+    user_view = visible.iloc[0]
+    view = pdk.ViewState(
+        latitude=user_view.lat,
+        longitude=user_view.lon,
+        zoom=12,
+        pitch=0
+    )
+
+    scatter = pdk.Layer("ScatterplotLayer",
+        data=visible,
+        get_position="[lon, lat]",
+        get_fill_color="color",
+        get_radius=30,
+        radiusUnits="pixels",
+        pickable=True
+    )
+
+    text = pdk.Layer("TextLayer",
+        data=visible,
+        get_position="[lon, lat]",
+        get_text="Email",
+        get_size=12,
+        get_color=[255, 255, 255],
+        get_alignment_baseline='"bottom"'
+    )
+
+    line = pdk.Layer("LineLayer",
+        data=df_lines,
+        get_source_position=["start_lon", "start_lat"],
+        get_target_position=["end_lon", "end_lat"],
+        get_color=[0, 128, 255],
+        get_width=3
+    )
+
+    deck = pdk.Deck(
+        layers=[scatter, text, line],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
+    )
+    st.pydeck_chart(deck, use_container_width=True)
+else:
+    st.info("Google Sheet is empty. Please log your location.")
