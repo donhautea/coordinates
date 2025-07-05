@@ -74,23 +74,41 @@ if sos_mode:
     mode = "Public"
     shared_code = "SOS"
 
-# 📝 Write to Google Sheet
-if email and lat != 0.0 and lon != 0.0:
-    worksheet.append_row([timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""])
-
-# 📊 Read and validate Google Sheet
+# ✅ Read Google Sheet
 records = worksheet.get_all_records()
-
-if not records:
-    st.warning("Google Sheet is empty. Submit your location first.")
-    st.stop()
-
 df = pd.DataFrame(records)
 
-required_cols = {"Timestamp", "Email", "Lat", "Lon", "Mode", "SharedCode", "SOS"}
-if not required_cols.issubset(df.columns):
-    st.error(f"Missing required columns in Sheet: {required_cols - set(df.columns)}")
-    st.code(f"Found columns: {list(df.columns)}")
+# 🆕 Prepare updated user data
+user_data = {
+    "Timestamp": timestamp,
+    "Email": email,
+    "Lat": lat,
+    "Lon": lon,
+    "Mode": mode,
+    "SharedCode": shared_code,
+    "SOS": "SOS" if sos_mode else ""
+}
+
+# 📝 Update existing or insert new
+if email and lat != 0.0 and lon != 0.0:
+    updated = False
+    for i, record in enumerate(records):
+        if record.get("Email", "").strip().lower() == email.strip().lower():
+            worksheet.update(f"A{i+2}:G{i+2}", [[
+                user_data["Timestamp"], user_data["Email"], user_data["Lat"],
+                user_data["Lon"], user_data["Mode"], user_data["SharedCode"], user_data["SOS"]
+            ]])
+            updated = True
+            break
+    if not updated:
+        worksheet.append_row([
+            user_data["Timestamp"], user_data["Email"], user_data["Lat"],
+            user_data["Lon"], user_data["Mode"], user_data["SharedCode"], user_data["SOS"]
+        ])
+
+# 🛑 Stop if empty or malformed
+if df.empty or "Timestamp" not in df.columns:
+    st.warning("Google Sheet is empty or missing headers. Please log your location.")
     st.stop()
 
 # 📅 Convert types
