@@ -8,7 +8,7 @@ import pytz
 
 st.set_page_config(page_title="Multi-User Map Tracker", layout="wide")
 
-# Connect to Google Sheet using new gdrive secrets
+# Connect to Google Sheets
 @st.cache_resource
 def get_worksheet():
     creds = service_account.Credentials.from_service_account_info(
@@ -22,40 +22,64 @@ def get_worksheet():
 
 worksheet = get_worksheet()
 
-# Sidebar – User Inputs
+# Sidebar – Settings
 st.sidebar.title("🔧 Settings")
 email = st.sidebar.text_input("📧 Your Email")
-lat = st.sidebar.number_input("🧭 Latitude", format="%.6f")
-lon = st.sidebar.number_input("🧭 Longitude", format="%.6f")
 mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"])
 shared_code = st.sidebar.text_input("🔑 Shared Code (Private groups)")
 show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
 sos_mode = st.sidebar.checkbox("🚨 Seek Emergency Assistance (SOS Mode)", value=False)
 
-# Use Philippine local time
+# Inject JS to get browser geolocation
+st.sidebar.markdown("📍 Getting GPS automatically...")
+gps_html = """
+<script>
+navigator.geolocation.getCurrentPosition(
+    (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const coords = `${lat},${lon}`;
+        window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, '*');
+    },
+    (err) => {
+        window.parent.postMessage({type: 'streamlit:setComponentValue', value: '0,0'}, '*');
+    }
+);
+</script>
+"""
+
+coords = st.components.v1.html(gps_html, height=0)
+coords = st.session_state.get("_streamlit_component_value", "0,0")
+
+try:
+    lat, lon = map(float, coords.split(","))
+except:
+    lat, lon = 0.0, 0.0
+
+# Use Philippine Time
 now = datetime.now(pytz.timezone("Asia/Manila"))
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# If SOS, override privacy and shared code
+# Override with SOS
 if sos_mode:
     mode = "Public"
     shared_code = "SOS"
 
-# Append user data to Google Sheet
-if email and lat and lon:
+# Append to sheet
+if email and lat != 0.0 and lon != 0.0:
     worksheet.append_row([timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""])
 
-# Force refresh every minute
+# Auto-refresh every 1 minute
 st_autorefresh = st.experimental_rerun
 st.experimental_rerun_interval = 60000  # 60 seconds
 
-# Load data
+# Read data from Google Sheet
 df = pd.DataFrame(worksheet.get_all_records())
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-# Assign colors
+# Assign marker color
 def get_color(row):
     if row["SOS"] == "SOS":
         return [255, 0, 0, 200]     # RED - SOS
@@ -68,7 +92,7 @@ def get_color(row):
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# Determine visible users
+# Visibility filter
 def get_visible_users():
     if sos_mode or mode == "Public":
         return df[df["Mode"] == "Public"]
