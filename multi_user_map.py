@@ -3,16 +3,22 @@ import pandas as pd
 import pydeck as pdk
 import gspread
 from google.oauth2 import service_account
-from streamlit_autorefresh import st_autorefresh
 from datetime import datetime, timedelta
 import pytz
 
 st.set_page_config(page_title="Multi-User Map Tracker", layout="wide")
 
-# ⏱ Refresh every 60 seconds
-st_autorefresh(interval=60000, key="auto_refresh")
+# Inject JavaScript to auto-refresh every 60 seconds
+st.markdown("""
+    <meta http-equiv="refresh" content="60">
+    <script>
+        setTimeout(function(){
+            window.location.reload(1);
+        }, 60000);
+    </script>
+""", unsafe_allow_html=True)
 
-# 📂 Connect to Google Sheet
+# Connect to Google Sheet
 @st.cache_resource
 def get_worksheet():
     creds = service_account.Credentials.from_service_account_info(
@@ -26,7 +32,7 @@ def get_worksheet():
 
 worksheet = get_worksheet()
 
-# 📌 Sidebar Inputs
+# Sidebar – Inputs
 st.sidebar.title("🔧 Settings")
 email = st.sidebar.text_input("📧 Your Email")
 mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"])
@@ -34,8 +40,9 @@ shared_code = st.sidebar.text_input("🔑 Shared Code (Private groups only)")
 show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
 sos_mode = st.sidebar.checkbox("🚨 Seek Emergency Assistance (SOS Mode)", value=False)
 
-# 🌐 Auto GPS Detection via JavaScript
-st.sidebar.markdown("📍 Detecting GPS automatically...")
+# Get GPS via JavaScript
+st.sidebar.markdown("📍 Getting your location...")
+
 gps_html = """
 <script>
 navigator.geolocation.getCurrentPosition(
@@ -60,39 +67,39 @@ try:
 except:
     lat, lon = 0.0, 0.0
 
-# 📅 Use PH Time
+# Philippine time
 now = datetime.now(pytz.timezone("Asia/Manila"))
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# 🚨 Override mode if in SOS
+# Force Public if SOS
 if sos_mode:
     mode = "Public"
     shared_code = "SOS"
 
-# 📝 Log to Google Sheet
+# Save to sheet
 if email and lat != 0.0 and lon != 0.0:
     worksheet.append_row([timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""])
 
-# 📊 Load data
+# Load records
 df = pd.DataFrame(worksheet.get_all_records())
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-# 🎨 Color logic
+# Assign color
 def get_color(row):
     if row["SOS"] == "SOS":
-        return [255, 0, 0, 200]     # Red - SOS
+        return [255, 0, 0, 200]
     elif not row["Active"]:
-        return [128, 128, 128, 100]  # Gray - Inactive
+        return [128, 128, 128, 100]
     elif row["Mode"] == "Public":
-        return [255, 255, 0, 160]   # Yellow - Public
+        return [255, 255, 0, 160]
     else:
-        return [0, 255, 0, 160]     # Green - Private
+        return [0, 255, 0, 160]
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# 👥 Visibility rules
+# Visibility filter
 def get_visible_users():
     if sos_mode or mode == "Public":
         return df[df["Mode"] == "Public"]
@@ -103,7 +110,7 @@ def get_visible_users():
 
 visible_df = get_visible_users()
 
-# 🗺 Show Map
+# Show map
 if not visible_df.empty:
     st.subheader("📍 Real-Time User Locations")
 
