@@ -3,12 +3,16 @@ import pandas as pd
 import pydeck as pdk
 import gspread
 from google.oauth2 import service_account
+from streamlit_autorefresh import st_autorefresh
 from datetime import datetime, timedelta
 import pytz
 
 st.set_page_config(page_title="Multi-User Map Tracker", layout="wide")
 
-# Connect to Google Sheets
+# ⏱ Refresh every 60 seconds
+st_autorefresh(interval=60000, key="auto_refresh")
+
+# 📂 Connect to Google Sheet
 @st.cache_resource
 def get_worksheet():
     creds = service_account.Credentials.from_service_account_info(
@@ -22,16 +26,16 @@ def get_worksheet():
 
 worksheet = get_worksheet()
 
-# Sidebar – Settings
+# 📌 Sidebar Inputs
 st.sidebar.title("🔧 Settings")
 email = st.sidebar.text_input("📧 Your Email")
 mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"])
-shared_code = st.sidebar.text_input("🔑 Shared Code (Private groups)")
+shared_code = st.sidebar.text_input("🔑 Shared Code (Private groups only)")
 show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
 sos_mode = st.sidebar.checkbox("🚨 Seek Emergency Assistance (SOS Mode)", value=False)
 
-# Inject JS to get browser geolocation
-st.sidebar.markdown("📍 Getting GPS automatically...")
+# 🌐 Auto GPS Detection via JavaScript
+st.sidebar.markdown("📍 Detecting GPS automatically...")
 gps_html = """
 <script>
 navigator.geolocation.getCurrentPosition(
@@ -56,54 +60,50 @@ try:
 except:
     lat, lon = 0.0, 0.0
 
-# Use Philippine Time
+# 📅 Use PH Time
 now = datetime.now(pytz.timezone("Asia/Manila"))
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# Override with SOS
+# 🚨 Override mode if in SOS
 if sos_mode:
     mode = "Public"
     shared_code = "SOS"
 
-# Append to sheet
+# 📝 Log to Google Sheet
 if email and lat != 0.0 and lon != 0.0:
     worksheet.append_row([timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""])
 
-# Auto-refresh every 1 minute
-st_autorefresh = st.experimental_rerun
-st.experimental_rerun_interval = 60000  # 60 seconds
-
-# Read data from Google Sheet
+# 📊 Load data
 df = pd.DataFrame(worksheet.get_all_records())
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-# Assign marker color
+# 🎨 Color logic
 def get_color(row):
     if row["SOS"] == "SOS":
-        return [255, 0, 0, 200]     # RED - SOS
+        return [255, 0, 0, 200]     # Red - SOS
     elif not row["Active"]:
-        return [128, 128, 128, 100]  # GRAY - Inactive
+        return [128, 128, 128, 100]  # Gray - Inactive
     elif row["Mode"] == "Public":
-        return [255, 255, 0, 160]   # YELLOW - Active Public
+        return [255, 255, 0, 160]   # Yellow - Public
     else:
-        return [0, 255, 0, 160]     # GREEN - Active Private
+        return [0, 255, 0, 160]     # Green - Private
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# Visibility filter
+# 👥 Visibility rules
 def get_visible_users():
     if sos_mode or mode == "Public":
         return df[df["Mode"] == "Public"]
     else:
         in_group = (df["Mode"] == "Private") & (df["SharedCode"] == shared_code)
-        public = (df["Mode"] == "Public") if show_public else False
+        public = df["Mode"] == "Public" if show_public else False
         return df[in_group | public]
 
 visible_df = get_visible_users()
 
-# Show map
+# 🗺 Show Map
 if not visible_df.empty:
     st.subheader("📍 Real-Time User Locations")
 
