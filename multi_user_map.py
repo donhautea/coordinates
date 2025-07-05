@@ -19,7 +19,7 @@ FILE_ID = st.secrets["gdrive"]["file_id"]
 
 # ------------------------- HELPERS -------------------------
 def default_origin():
-    return 14.64171, 121.05078
+    return 14.3650679146823, 120.890941478913
 
 def get_elevation(lat, lon):
     try:
