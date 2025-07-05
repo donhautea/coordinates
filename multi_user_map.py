@@ -1,195 +1,179 @@
 import streamlit as st
 import pandas as pd
-import pydeck as pdk
+import requests
 import gspread
-from google.oauth2 import service_account
-from datetime import datetime, timedelta
-import pytz
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from geopy.geocoders import Nominatim
+import pydeck as pdk
+from streamlit_geolocation import streamlit_geolocation
 
-st.set_page_config(page_title="Multi-User Map Tracker", layout="wide")
+# ------------------------- CONFIG -------------------------
+st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
+PH_TIMEZONE = ZoneInfo("Asia/Manila")
+geolocator = Nominatim(user_agent="geo_app")
+FILE_ID = "1CPXH8IZVGXLzApaQNC2GvTkAETpGGAjQlfJ8SdtBbxc"  # Your actual Sheet ID
 
-# 🔁 Auto-refresh every 60 seconds
-st.markdown("""
-    <meta http-equiv="refresh" content="60">
-    <script>
-        setTimeout(function(){
-            window.location.reload(1);
-        }, 60000);
-    </script>
-""", unsafe_allow_html=True)
+def default_origin():
+    return 14.64171, 121.05078  # Default coordinates (can be updated)
 
-# ✅ Initialize session_state
-for key in ["email", "mode", "shared_code", "sos_mode", "lat", "lon", "last_logged", "force_gps"]:
-    if key not in st.session_state:
-        st.session_state[key] = ""
-
-# ✅ Connect to Google Sheet
-@st.cache_resource
-def get_worksheet():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gdrive"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    client = gspread.authorize(creds)
-    file_id = st.secrets["gdrive"]["file_id"]
-    return client.open_by_key(file_id).sheet1
-
-worksheet = get_worksheet()
-
-# 📋 Sidebar Inputs
-st.sidebar.title("🔧 Settings")
-st.session_state.email = st.sidebar.text_input("📧 Your Email", st.session_state.email)
-st.session_state.mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"], index=["Public", "Private"].index(st.session_state.mode or "Public"))
-st.session_state.shared_code = st.sidebar.text_input("🔑 Shared Code", st.session_state.shared_code)
-st.session_state.sos_mode = st.sidebar.checkbox("🚨 SOS Mode", value=st.session_state.sos_mode)
-show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
-
-# 📍 Location Detection Button
-if st.sidebar.button("📍 Refresh My Location"):
-    st.session_state["lat"] = ""
-    st.session_state["lon"] = ""
-    st.session_state["force_gps"] = True
-
-# 🧭 Auto GPS detection (with JS injection)
-if not st.session_state.lat or not st.session_state.lon or st.session_state.force_gps:
-    st.sidebar.markdown("📍 Getting your current location...")
-
-    st.components.v1.html("""
-        <script>
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                const coords = `${pos.coords.latitude},${pos.coords.longitude}`;
-                window.parent.postMessage({ type: 'streamlit:setComponentValue', value: coords }, '*');
-            },
-            (err) => {
-                window.parent.postMessage({ type: 'streamlit:setComponentValue', value: '0,0' }, '*');
-            }
-        );
-        </script>
-    """, height=0)
-
-    coords = st.session_state.get("_streamlit_component_value", "0,0")
+# ------------------------- HELPERS -------------------------
+def get_elevation(lat, lon):
     try:
-        lat, lon = map(float, coords.split(","))
-        if lat != 0.0 and lon != 0.0:
-            st.session_state.lat = lat
-            st.session_state.lon = lon
-            st.session_state.force_gps = False
+        r = requests.get(
+            f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}",
+            timeout=5
+        )
+        if r.status_code == 200:
+            return r.json()["results"][0]["elevation"]
     except:
-        st.session_state.lat = 0.0
-        st.session_state.lon = 0.0
+        pass
+    return None
 
-# 🌐 Show current coordinates
-st.sidebar.markdown(f"📌 **Latitude**: `{st.session_state.lat}`")
-st.sidebar.markdown(f"📌 **Longitude**: `{st.session_state.lon}`")
-
-# 🕒 Philippine time
-now = datetime.now(pytz.timezone("Asia/Manila"))
-timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-
-# 🔴 SOS forces Public + "SOS" code
-if st.session_state.sos_mode:
-    st.session_state.mode = "Public"
-    st.session_state.shared_code = "SOS"
-
-# 📝 Write to Sheet
-if st.session_state.email and st.session_state.lat and st.session_state.lon:
+def reverse_geocode(lat, lon):
     try:
-        records = worksheet.get_all_records()
-        updated = False
-        for i, record in enumerate(records):
-            if record.get("Email", "").strip().lower() == st.session_state.email.strip().lower():
-                worksheet.update(f"A{i+2}:G{i+2}", [[
-                    timestamp, st.session_state.email, st.session_state.lat,
-                    st.session_state.lon, st.session_state.mode,
-                    st.session_state.shared_code, "SOS" if st.session_state.sos_mode else ""
-                ]])
-                updated = True
-                break
-        if not updated:
-            worksheet.append_row([
-                timestamp, st.session_state.email, st.session_state.lat,
-                st.session_state.lon, st.session_state.mode,
-                st.session_state.shared_code, "SOS" if st.session_state.sos_mode else ""
-            ])
-        st.session_state.last_logged = f"✅ Logged at {timestamp}"
-    except Exception as e:
-        st.error(f"❌ Failed to log to Google Sheets: {e}")
-        st.stop()
+        loc = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
+        return loc.address if loc else None
+    except:
+        return None
 
-# ✅ Show logging confirmation
-if st.session_state.last_logged:
-    st.sidebar.success(st.session_state.last_logged)
+# ------------------------- GOOGLE SHEET LOGGING -------------------------
+@st.cache_resource
+def get_sheet():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict({
+        "type": "service_account",
+        "project_id": "geolocator-bearing",
+        "private_key_id": st.secrets["gdrive"]["private_key_id"],
+        "private_key": st.secrets["gdrive"]["private_key"].replace('\\n', '\n'),
+        "client_email": st.secrets["gdrive"]["client_email"],
+        "client_id": st.secrets["gdrive"]["client_id"],
+        "token_uri": st.secrets["gdrive"]["token_uri"]
+    }, scope)
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(FILE_ID)
+    try:
+        return sh.worksheet("multi_geolocator_log")
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title="multi_geolocator_log", rows="1000", cols="6")
+        headers = ["Email", "Timestamp", "Latitude", "Longitude", "Elevation", "Address"]
+        ws.insert_row(headers, 1)
+        return ws
 
-# 🔁 Reload data after write
-records = worksheet.get_all_records()
-if not records:
-    st.warning("Google Sheet is empty.")
-    st.stop()
+def append_to_sheet(record):
+    sheet = get_sheet()
+    headers = sheet.row_values(1)
+    row = [record.get(h, "") for h in headers]
+    if any(row):
+        sheet.append_row(row, value_input_option="USER_ENTERED")
 
-df = pd.DataFrame(records)
+@st.cache_data(ttl=60)
+def fetch_latest_locations():
+    sheet = get_sheet()
+    df = pd.DataFrame(sheet.get_all_records())
+    df.columns = [c.strip() for c in df.columns]
+    if "Longtitude" in df.columns:
+        df.rename(columns={"Longtitude": "Longitude"}, inplace=True)
+    required = {"Email", "Latitude", "Longitude", "Timestamp"}
+    if not required.issubset(df.columns):
+        return pd.DataFrame()
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+    recent = df.sort_values("Timestamp").groupby("Email", as_index=False).tail(1)
+    return recent.rename(columns={"Latitude": "lat", "Longitude": "lon"})
 
-# ✅ Ensure required columns exist
-required_cols = {"Timestamp", "Email", "Lat", "Lon", "Mode", "SharedCode", "SOS"}
-if not required_cols.issubset(df.columns):
-    st.error(f"Missing columns: {required_cols - set(df.columns)}")
-    st.code(f"Found columns: {list(df.columns)}")
-    st.stop()
+# ------------------------- MAIN APP -------------------------
+st.title("📍 Multi-User Geolocation Tracker with Routes")
+st.write("Detect your GPS location, log it by email, and see routes from the origin.")
 
-# 📊 Process
-df["Timestamp"] = pd.to_datetime(df["Timestamp"]).dt.tz_localize("Asia/Manila")
-df["Age"] = now - df["Timestamp"]
-df["Active"] = df["Age"] < timedelta(minutes=15)
+# ➕ New: Force Refresh Button
+refresh_loc = st.button("📍 Refresh My Location")
+if refresh_loc:
+    st.session_state["streamlit_geolocation"] = None  # Clear session cache for new coordinates
 
-# 🎨 Marker color
-def get_color(row):
-    if row["SOS"] == "SOS":
-        return [255, 0, 0, 200]
-    elif not row["Active"]:
-        return [128, 128, 128, 100]
-    elif row["Mode"] == "Public":
-        return [255, 255, 0, 160]
+# 🔍 Geolocation Detection
+data = streamlit_geolocation()
+
+email = st.text_input("Enter your email:")
+origin_lat, origin_lon = default_origin()
+
+# ✅ Logging if both email and GPS are available
+if data and email:
+    lat = data.get("latitude")
+    lon = data.get("longitude")
+    if lat is not None and lon is not None:
+        now = datetime.now(PH_TIMEZONE)
+        elev = get_elevation(lat, lon)
+        addr = reverse_geocode(lat, lon)
+        record = {
+            "Email": email,
+            "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "Latitude": lat,
+            "Longitude": lon,
+            "Elevation": elev,
+            "Address": addr
+        }
+        append_to_sheet(record)
+        st.success("📌 Location logged successfully!")
     else:
-        return [0, 255, 0, 160]
+        st.error("Unable to retrieve GPS location.")
 
-df["Color"] = df.apply(get_color, axis=1)
+# 🗺️ Show Map
+df_map = fetch_latest_locations()
+if not df_map.empty:
+    df_lines = pd.DataFrame([{
+        "start_lat": origin_lat,
+        "start_lon": origin_lon,
+        "end_lat": row.lat,
+        "end_lon": row.lon
+    } for _, row in df_map.iterrows()])
 
-# 🔍 Filter visibility
-def get_visible_users():
-    if st.session_state.sos_mode or st.session_state.mode == "Public":
-        return df[df["Mode"] == "Public"]
-    else:
-        in_group = (df["Mode"] == "Private") & (df["SharedCode"] == st.session_state.shared_code)
-        public = df["Mode"] == "Public" if show_public else False
-        return df[in_group | public]
-
-visible_df = get_visible_users()
-
-# 🗺️ Map Display
-if not visible_df.empty:
-    st.subheader("📍 Real-Time User Locations")
-
-    layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=visible_df,
-        get_position='[Lon, Lat]',
-        get_color='Color',
-        get_radius=100,
-        pickable=True
-    )
-
-    view_state = pdk.ViewState(
-        latitude=visible_df["Lat"].mean(),
-        longitude=visible_df["Lon"].mean(),
-        zoom=5,
+    user_view = df_map.iloc[0]
+    view = pdk.ViewState(
+        latitude=user_view.lat,
+        longitude=user_view.lon,
+        zoom=12,
         pitch=0
     )
 
-    st.pydeck_chart(pdk.Deck(
-        map_style="mapbox://styles/mapbox/light-v9",
-        initial_view_state=view_state,
-        layers=[layer],
-        tooltip={"text": "📧 {Email}\n🕒 {Timestamp}\n🔐 {Mode} {SOS}"}
-    ))
+    scatter = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_map,
+        get_position="[lon, lat]",
+        get_fill_color=[255, 0, 0],
+        get_radius=20,
+        radiusUnits="pixels",
+        pickable=True
+    )
+
+    text = pdk.Layer(
+        "TextLayer",
+        data=df_map,
+        get_position="[lon, lat]",
+        get_text="Email",
+        get_size=12,
+        get_color=[255, 255, 0],
+        get_alignment_baseline='"bottom"'
+    )
+
+    line = pdk.Layer(
+        "LineLayer",
+        data=df_lines,
+        get_source_position=["start_lon", "start_lat"],
+        get_target_position=["end_lon", "end_lat"],
+        get_color=[0, 128, 255],
+        get_width=3
+    )
+
+    deck = pdk.Deck(
+        layers=[scatter, text, line],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
+    )
+
+    st.pydeck_chart(deck, use_container_width=True)
 else:
-    st.warning("No users to display based on your filters.")
+    st.info("No valid location data to display.")
