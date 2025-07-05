@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -97,15 +98,12 @@ with st.sidebar:
     show_public = st.checkbox("Also show public users", value=True)
     sos = st.checkbox("🚨 Emergency Mode (SOS)")
 
-# Refresh button
 if st.button("📍 Refresh My Location"):
     st.session_state["streamlit_geolocation"] = None
 
-# Get location
 data = streamlit_geolocation()
 origin_lat, origin_lon = default_origin()
 
-# Log to sheet
 if data and email:
     lat = data.get("latitude")
     lon = data.get("longitude")
@@ -129,12 +127,11 @@ if data and email:
 else:
     st.info("Please allow GPS access and enter your email.")
 
-# Display map
 df_map = fetch_latest_locations()
 if not df_map.empty:
     if mode == "Private":
         df_map = df_map[((df_map["Mode"] == "Public") & show_public) | (df_map["SharedCode"] == shared_code)]
-    else:  # Public mode
+    else:
         df_map = df_map[df_map["Mode"] == "Public"]
 
     df_map["Color"] = df_map.apply(
@@ -164,7 +161,7 @@ if not df_map.empty:
         get_position="[lon, lat]",
         get_text="Email",
         get_size=12,
-        get_color=[255, 255, 255],
+        get_color=[173, 216, 230],
         get_alignment_baseline='"bottom"'
     )
     line = pdk.Layer(
