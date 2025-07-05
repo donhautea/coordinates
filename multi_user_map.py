@@ -10,8 +10,10 @@ from geopy.geocoders import Nominatim
 import pydeck as pdk
 from streamlit_geolocation import streamlit_geolocation
 import math
+from streamlit_autorefresh import st_autorefresh
 
 # ------------------------- CONFIG -------------------------
+st_autorefresh(interval=60 * 1000, limit=None, key='auto-refresh')
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
