@@ -6,18 +6,18 @@ from google.oauth2 import service_account
 from datetime import datetime, timedelta
 import pytz
 
-# Streamlit Page Config
 st.set_page_config(page_title="Multi-User Map Tracker", layout="wide")
 
-# Connect to Google Sheet
+# Connect to Google Sheet using new gdrive secrets
 @st.cache_resource
 def get_worksheet():
     creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
+        st.secrets["gdrive"],
         scopes=["https://www.googleapis.com/auth/spreadsheets"]
     )
     client = gspread.authorize(creds)
-    sheet = client.open("multi_geolocation_log").sheet1
+    file_id = st.secrets["gdrive"]["file_id"]
+    sheet = client.open_by_key(file_id).sheet1
     return sheet
 
 worksheet = get_worksheet()
@@ -47,7 +47,7 @@ if email and lat and lon:
 
 # Force refresh every minute
 st_autorefresh = st.experimental_rerun
-st.experimental_rerun_interval = 60000
+st.experimental_rerun_interval = 60000  # 60 seconds
 
 # Load data
 df = pd.DataFrame(worksheet.get_all_records())
@@ -105,7 +105,5 @@ if not visible_df.empty:
         layers=[layer],
         tooltip={"text": "📧 {Email}\n🕒 {Timestamp}\n🔐 {Mode} {SOS}"}
     ))
-
 else:
     st.warning("No users to display based on your visibility settings.")
-
