@@ -7,5 +7,4 @@ requests
 geopy
 pydeck
 streamlit-autorefresh
-google-autorefresh
 pytz
