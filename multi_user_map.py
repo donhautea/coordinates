@@ -74,49 +74,43 @@ if sos_mode:
     mode = "Public"
     shared_code = "SOS"
 
-# ✅ Read Google Sheet
-records = worksheet.get_all_records()
-df = pd.DataFrame(records)
-
-# 🆕 Prepare updated user data
-user_data = {
-    "Timestamp": timestamp,
-    "Email": email,
-    "Lat": lat,
-    "Lon": lon,
-    "Mode": mode,
-    "SharedCode": shared_code,
-    "SOS": "SOS" if sos_mode else ""
-}
-
-# 📝 Update existing or insert new
+# 📝 Insert or Update user's row
 if email and lat != 0.0 and lon != 0.0:
+    records = worksheet.get_all_records()
     updated = False
     for i, record in enumerate(records):
         if record.get("Email", "").strip().lower() == email.strip().lower():
             worksheet.update(f"A{i+2}:G{i+2}", [[
-                user_data["Timestamp"], user_data["Email"], user_data["Lat"],
-                user_data["Lon"], user_data["Mode"], user_data["SharedCode"], user_data["SOS"]
+                timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""
             ]])
             updated = True
             break
     if not updated:
         worksheet.append_row([
-            user_data["Timestamp"], user_data["Email"], user_data["Lat"],
-            user_data["Lon"], user_data["Mode"], user_data["SharedCode"], user_data["SOS"]
+            timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""
         ])
 
-# 🛑 Stop if empty or malformed
-if df.empty or "Timestamp" not in df.columns:
-    st.warning("Google Sheet is empty or missing headers. Please log your location.")
+# ✅ RELOAD records after update
+records = worksheet.get_all_records()
+if not records:
+    st.warning("Google Sheet is empty. Please log your location.")
     st.stop()
 
-# 📅 Convert types
+df = pd.DataFrame(records)
+
+# ✅ Ensure headers exist
+required_cols = {"Timestamp", "Email", "Lat", "Lon", "Mode", "SharedCode", "SOS"}
+if not required_cols.issubset(df.columns):
+    st.error(f"Missing required columns in Sheet: {required_cols - set(df.columns)}")
+    st.code(f"Found columns: {list(df.columns)}")
+    st.stop()
+
+# 🧠 Process Data
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-# 🎨 Assign marker color
+# 🎨 Assign Marker Color
 def get_color(row):
     if row["SOS"] == "SOS":
         return [255, 0, 0, 200]      # Red - SOS
@@ -129,7 +123,7 @@ def get_color(row):
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# 🔍 Visibility filtering
+# 🔍 Filter visible users
 def get_visible_users():
     if sos_mode or mode == "Public":
         return df[df["Mode"] == "Public"]
@@ -140,7 +134,7 @@ def get_visible_users():
 
 visible_df = get_visible_users()
 
-# 🗺 Display map
+# 🗺 Display Map
 if not visible_df.empty:
     st.subheader("📍 Real-Time User Locations")
 
