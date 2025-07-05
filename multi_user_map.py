@@ -18,6 +18,11 @@ st.markdown("""
     </script>
 """, unsafe_allow_html=True)
 
+# 📌 Initialize session_state
+for key in ["email", "mode", "shared_code", "sos_mode", "lat", "lon"]:
+    if key not in st.session_state:
+        st.session_state[key] = ""
+
 # ✅ Connect to Google Sheet
 @st.cache_resource
 def get_worksheet():
@@ -27,20 +32,20 @@ def get_worksheet():
     )
     client = gspread.authorize(creds)
     file_id = st.secrets["gdrive"]["file_id"]
-    sheet = client.open_by_key(file_id).sheet1
-    return sheet
+    return client.open_by_key(file_id).sheet1
 
 worksheet = get_worksheet()
 
-# 📋 Sidebar Inputs
+# 📋 Sidebar Inputs (remember values)
 st.sidebar.title("🔧 Settings")
-email = st.sidebar.text_input("📧 Your Email")
-mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"])
-shared_code = st.sidebar.text_input("🔑 Shared Code (Private group)")
-show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
-sos_mode = st.sidebar.checkbox("🚨 Seek Emergency Assistance (SOS Mode)", value=False)
 
-# 📍 Auto GPS via JS
+st.session_state.email = st.sidebar.text_input("📧 Your Email", st.session_state.email)
+st.session_state.mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"], index=["Public", "Private"].index(st.session_state.mode or "Public"))
+st.session_state.shared_code = st.sidebar.text_input("🔑 Shared Code", st.session_state.shared_code)
+st.session_state.sos_mode = st.sidebar.checkbox("🚨 Seek Emergency Assistance", value=st.session_state.sos_mode)
+show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
+
+# 🧭 GPS Auto-detect via JS
 st.sidebar.markdown("📍 Auto-detecting location...")
 gps_html = """
 <script>
@@ -62,46 +67,57 @@ coords = st.session_state.get("_streamlit_component_value", "0,0")
 
 try:
     lat, lon = map(float, coords.split(","))
+    if lat != 0.0 and lon != 0.0:
+        st.session_state.lat = lat
+        st.session_state.lon = lon
 except:
     lat, lon = 0.0, 0.0
 
-# ⏰ Use Philippine Time
+# ⏰ Philippine Time
 now = datetime.now(pytz.timezone("Asia/Manila"))
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# 🔴 If SOS, override mode
-if sos_mode:
-    mode = "Public"
-    shared_code = "SOS"
+# 🛡️ If SOS, override to public
+if st.session_state.sos_mode:
+    st.session_state.mode = "Public"
+    st.session_state.shared_code = "SOS"
 
-# 📝 Insert or Update user's row
-if email and lat != 0.0 and lon != 0.0:
-    records = worksheet.get_all_records()
-    updated = False
-    for i, record in enumerate(records):
-        if record.get("Email", "").strip().lower() == email.strip().lower():
-            worksheet.update(f"A{i+2}:G{i+2}", [[
-                timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""
-            ]])
-            updated = True
-            break
-    if not updated:
-        worksheet.append_row([
-            timestamp, email, lat, lon, mode, shared_code, "SOS" if sos_mode else ""
-        ])
+# 📝 Write or Update in Sheet
+if st.session_state.email and st.session_state.lat and st.session_state.lon:
+    try:
+        records = worksheet.get_all_records()
+        updated = False
+        for i, record in enumerate(records):
+            if record.get("Email", "").strip().lower() == st.session_state.email.strip().lower():
+                worksheet.update(f"A{i+2}:G{i+2}", [[
+                    timestamp, st.session_state.email, st.session_state.lat,
+                    st.session_state.lon, st.session_state.mode,
+                    st.session_state.shared_code, "SOS" if st.session_state.sos_mode else ""
+                ]])
+                updated = True
+                break
+        if not updated:
+            worksheet.append_row([
+                timestamp, st.session_state.email, st.session_state.lat,
+                st.session_state.lon, st.session_state.mode,
+                st.session_state.shared_code, "SOS" if st.session_state.sos_mode else ""
+            ])
+    except Exception as e:
+        st.error(f"❌ Failed to update Google Sheet: {e}")
+        st.stop()
 
-# ✅ RELOAD records after update
+# ✅ Re-load latest sheet data after write
 records = worksheet.get_all_records()
 if not records:
-    st.warning("Google Sheet is empty. Please log your location.")
+    st.warning("Google Sheet is empty.")
     st.stop()
 
 df = pd.DataFrame(records)
 
-# ✅ Ensure headers exist
+# ✅ Column check
 required_cols = {"Timestamp", "Email", "Lat", "Lon", "Mode", "SharedCode", "SOS"}
 if not required_cols.issubset(df.columns):
-    st.error(f"Missing required columns in Sheet: {required_cols - set(df.columns)}")
+    st.error(f"Missing required columns: {required_cols - set(df.columns)}")
     st.code(f"Found columns: {list(df.columns)}")
     st.stop()
 
@@ -110,31 +126,31 @@ df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-# 🎨 Assign Marker Color
+# 🎨 Marker Color
 def get_color(row):
     if row["SOS"] == "SOS":
-        return [255, 0, 0, 200]      # Red - SOS
+        return [255, 0, 0, 200]
     elif not row["Active"]:
-        return [128, 128, 128, 100]  # Gray - Inactive
+        return [128, 128, 128, 100]
     elif row["Mode"] == "Public":
-        return [255, 255, 0, 160]    # Yellow - Public
+        return [255, 255, 0, 160]
     else:
-        return [0, 255, 0, 160]      # Green - Private
+        return [0, 255, 0, 160]
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# 🔍 Filter visible users
+# 👥 Filter users
 def get_visible_users():
-    if sos_mode or mode == "Public":
+    if st.session_state.sos_mode or st.session_state.mode == "Public":
         return df[df["Mode"] == "Public"]
     else:
-        in_group = (df["Mode"] == "Private") & (df["SharedCode"] == shared_code)
+        in_group = (df["Mode"] == "Private") & (df["SharedCode"] == st.session_state.shared_code)
         public = df["Mode"] == "Public" if show_public else False
         return df[in_group | public]
 
 visible_df = get_visible_users()
 
-# 🗺 Display Map
+# 🗺 Map
 if not visible_df.empty:
     st.subheader("📍 Real-Time User Locations")
 
