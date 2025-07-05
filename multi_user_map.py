@@ -77,6 +77,21 @@ def get_sheet():
         return ws
 
 def append_to_sheet(record):
+
+        update_mode_for_email(email, "SOS" if sos else mode)
+
+def update_mode_for_email(email, new_mode):
+    sheet = get_sheet()
+    records = sheet.get_all_values()
+    headers = records[0]
+    updated_rows = []
+    for row in records[1:]:
+        if row and len(row) >= headers.index("Email") + 1 and row[headers.index("Email")] == email:
+            row[headers.index("Mode")] = new_mode
+        updated_rows.append(row)
+    # Overwrite all rows (except header)
+    sheet.batch_clear(["A2:H"])
+    sheet.insert_rows(updated_rows, row=2)
     sheet = get_sheet()
     headers = sheet.row_values(1)
     row = [record.get(h, "") for h in headers]
