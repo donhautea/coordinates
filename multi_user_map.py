@@ -85,6 +85,8 @@ def fetch_latest_locations():
     df["Active"] = df["Age"] < timedelta(minutes=15)
     df["lat"] = df["Latitude"]
     df["lon"] = df["Longitude"]
+    df.sort_values("Timestamp", ascending=True, inplace=True)
+    df = df.drop_duplicates(subset="Email", keep="last")
     return df
 
 # ------------------------- UI + MAP -------------------------
