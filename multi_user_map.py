@@ -19,7 +19,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 📌 Initialize session_state
-for key in ["email", "mode", "shared_code", "sos_mode", "lat", "lon"]:
+for key in ["email", "mode", "shared_code", "sos_mode", "lat", "lon", "last_logged"]:
     if key not in st.session_state:
         st.session_state[key] = ""
 
@@ -36,17 +36,19 @@ def get_worksheet():
 
 worksheet = get_worksheet()
 
-# 📋 Sidebar Inputs (remember values)
+# 📋 Sidebar Inputs (persistent)
 st.sidebar.title("🔧 Settings")
-
 st.session_state.email = st.sidebar.text_input("📧 Your Email", st.session_state.email)
-st.session_state.mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"], index=["Public", "Private"].index(st.session_state.mode or "Public"))
+st.session_state.mode = st.sidebar.selectbox(
+    "🔐 Privacy Mode", ["Public", "Private"],
+    index=["Public", "Private"].index(st.session_state.mode or "Public")
+)
 st.session_state.shared_code = st.sidebar.text_input("🔑 Shared Code", st.session_state.shared_code)
-st.session_state.sos_mode = st.sidebar.checkbox("🚨 Seek Emergency Assistance", value=st.session_state.sos_mode)
+st.session_state.sos_mode = st.sidebar.checkbox("🚨 SOS Mode", value=st.session_state.sos_mode)
 show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
 
-# 🧭 GPS Auto-detect via JS
-st.sidebar.markdown("📍 Auto-detecting location...")
+# 📍 GPS Auto-detect
+st.sidebar.markdown("📍 Auto-detecting coordinates...")
 gps_html = """
 <script>
 navigator.geolocation.getCurrentPosition(
@@ -71,18 +73,23 @@ try:
         st.session_state.lat = lat
         st.session_state.lon = lon
 except:
-    lat, lon = 0.0, 0.0
+    st.session_state.lat = 0.0
+    st.session_state.lon = 0.0
 
-# ⏰ Philippine Time
+# 🧭 Display coordinates in sidebar
+st.sidebar.markdown(f"📌 **Latitude**: `{st.session_state.lat}`")
+st.sidebar.markdown(f"📌 **Longitude**: `{st.session_state.lon}`")
+
+# 🕒 Use Philippine time
 now = datetime.now(pytz.timezone("Asia/Manila"))
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# 🛡️ If SOS, override to public
+# 🔴 SOS Mode override
 if st.session_state.sos_mode:
     st.session_state.mode = "Public"
     st.session_state.shared_code = "SOS"
 
-# 📝 Write or Update in Sheet
+# 📝 Log to Google Sheet
 if st.session_state.email and st.session_state.lat and st.session_state.lon:
     try:
         records = worksheet.get_all_records()
@@ -102,11 +109,16 @@ if st.session_state.email and st.session_state.lat and st.session_state.lon:
                 st.session_state.lon, st.session_state.mode,
                 st.session_state.shared_code, "SOS" if st.session_state.sos_mode else ""
             ])
+        st.session_state.last_logged = f"✅ Logged at {timestamp}"
     except Exception as e:
-        st.error(f"❌ Failed to update Google Sheet: {e}")
+        st.error(f"❌ Failed to log to Google Sheets: {e}")
         st.stop()
 
-# ✅ Re-load latest sheet data after write
+# ✅ Show logging confirmation
+if st.session_state.last_logged:
+    st.sidebar.success(st.session_state.last_logged)
+
+# 🔁 Reload sheet data
 records = worksheet.get_all_records()
 if not records:
     st.warning("Google Sheet is empty.")
@@ -114,19 +126,19 @@ if not records:
 
 df = pd.DataFrame(records)
 
-# ✅ Column check
+# ✅ Check columns
 required_cols = {"Timestamp", "Email", "Lat", "Lon", "Mode", "SharedCode", "SOS"}
 if not required_cols.issubset(df.columns):
     st.error(f"Missing required columns: {required_cols - set(df.columns)}")
     st.code(f"Found columns: {list(df.columns)}")
     st.stop()
 
-# 🧠 Process Data
+# 📊 Process data
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-# 🎨 Marker Color
+# 🎨 Assign marker color
 def get_color(row):
     if row["SOS"] == "SOS":
         return [255, 0, 0, 200]
@@ -139,7 +151,7 @@ def get_color(row):
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# 👥 Filter users
+# 👁️ Visibility filter
 def get_visible_users():
     if st.session_state.sos_mode or st.session_state.mode == "Public":
         return df[df["Mode"] == "Public"]
@@ -150,7 +162,7 @@ def get_visible_users():
 
 visible_df = get_visible_users()
 
-# 🗺 Map
+# 🗺️ Display map
 if not visible_df.empty:
     st.subheader("📍 Real-Time User Locations")
 
