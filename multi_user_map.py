@@ -134,9 +134,10 @@ if not required_cols.issubset(df.columns):
     st.stop()
 
 # 📊 Process data
-df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+df["Timestamp"] = pd.to_datetime(df["Timestamp"]).dt.tz_localize("Asia/Manila")
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
+
 
 # 🎨 Assign marker color
 def get_color(row):
