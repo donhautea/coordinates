@@ -18,8 +18,8 @@ st.markdown("""
     </script>
 """, unsafe_allow_html=True)
 
-# 📌 Initialize session_state
-for key in ["email", "mode", "shared_code", "sos_mode", "lat", "lon", "last_logged"]:
+# ✅ Initialize session_state
+for key in ["email", "mode", "shared_code", "sos_mode", "lat", "lon", "last_logged", "force_gps"]:
     if key not in st.session_state:
         st.session_state[key] = ""
 
@@ -36,60 +36,63 @@ def get_worksheet():
 
 worksheet = get_worksheet()
 
-# 📋 Sidebar Inputs (persistent)
+# 📋 Sidebar Inputs
 st.sidebar.title("🔧 Settings")
 st.session_state.email = st.sidebar.text_input("📧 Your Email", st.session_state.email)
-st.session_state.mode = st.sidebar.selectbox(
-    "🔐 Privacy Mode", ["Public", "Private"],
-    index=["Public", "Private"].index(st.session_state.mode or "Public")
-)
+st.session_state.mode = st.sidebar.selectbox("🔐 Privacy Mode", ["Public", "Private"], index=["Public", "Private"].index(st.session_state.mode or "Public"))
 st.session_state.shared_code = st.sidebar.text_input("🔑 Shared Code", st.session_state.shared_code)
 st.session_state.sos_mode = st.sidebar.checkbox("🚨 SOS Mode", value=st.session_state.sos_mode)
 show_public = st.sidebar.checkbox("👀 Show Public Users", value=True)
 
-# 📍 GPS Auto-detect
-st.sidebar.markdown("📍 Auto-detecting coordinates...")
-gps_html = """
-<script>
-navigator.geolocation.getCurrentPosition(
-    (pos) => {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        const coords = `${lat},${lon}`;
-        window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, '*');
-    },
-    (err) => {
-        window.parent.postMessage({type: 'streamlit:setComponentValue', value: '0,0'}, '*');
-    }
-);
-</script>
-"""
-coords = st.components.v1.html(gps_html, height=0)
-coords = st.session_state.get("_streamlit_component_value", "0,0")
+# 📍 Location Detection Button
+if st.sidebar.button("📍 Refresh My Location"):
+    st.session_state["lat"] = ""
+    st.session_state["lon"] = ""
+    st.session_state["force_gps"] = True
 
-try:
-    lat, lon = map(float, coords.split(","))
-    if lat != 0.0 and lon != 0.0:
-        st.session_state.lat = lat
-        st.session_state.lon = lon
-except:
-    st.session_state.lat = 0.0
-    st.session_state.lon = 0.0
+# 🧭 Auto GPS detection (with JS injection)
+if not st.session_state.lat or not st.session_state.lon or st.session_state.force_gps:
+    st.sidebar.markdown("📍 Getting your current location...")
 
-# 🧭 Display coordinates in sidebar
+    st.components.v1.html("""
+        <script>
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const coords = `${pos.coords.latitude},${pos.coords.longitude}`;
+                window.parent.postMessage({ type: 'streamlit:setComponentValue', value: coords }, '*');
+            },
+            (err) => {
+                window.parent.postMessage({ type: 'streamlit:setComponentValue', value: '0,0' }, '*');
+            }
+        );
+        </script>
+    """, height=0)
+
+    coords = st.session_state.get("_streamlit_component_value", "0,0")
+    try:
+        lat, lon = map(float, coords.split(","))
+        if lat != 0.0 and lon != 0.0:
+            st.session_state.lat = lat
+            st.session_state.lon = lon
+            st.session_state.force_gps = False
+    except:
+        st.session_state.lat = 0.0
+        st.session_state.lon = 0.0
+
+# 🌐 Show current coordinates
 st.sidebar.markdown(f"📌 **Latitude**: `{st.session_state.lat}`")
 st.sidebar.markdown(f"📌 **Longitude**: `{st.session_state.lon}`")
 
-# 🕒 Use Philippine time
+# 🕒 Philippine time
 now = datetime.now(pytz.timezone("Asia/Manila"))
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# 🔴 SOS Mode override
+# 🔴 SOS forces Public + "SOS" code
 if st.session_state.sos_mode:
     st.session_state.mode = "Public"
     st.session_state.shared_code = "SOS"
 
-# 📝 Log to Google Sheet
+# 📝 Write to Sheet
 if st.session_state.email and st.session_state.lat and st.session_state.lon:
     try:
         records = worksheet.get_all_records()
@@ -118,7 +121,7 @@ if st.session_state.email and st.session_state.lat and st.session_state.lon:
 if st.session_state.last_logged:
     st.sidebar.success(st.session_state.last_logged)
 
-# 🔁 Reload sheet data
+# 🔁 Reload data after write
 records = worksheet.get_all_records()
 if not records:
     st.warning("Google Sheet is empty.")
@@ -126,20 +129,19 @@ if not records:
 
 df = pd.DataFrame(records)
 
-# ✅ Check columns
+# ✅ Ensure required columns exist
 required_cols = {"Timestamp", "Email", "Lat", "Lon", "Mode", "SharedCode", "SOS"}
 if not required_cols.issubset(df.columns):
-    st.error(f"Missing required columns: {required_cols - set(df.columns)}")
+    st.error(f"Missing columns: {required_cols - set(df.columns)}")
     st.code(f"Found columns: {list(df.columns)}")
     st.stop()
 
-# 📊 Process data
+# 📊 Process
 df["Timestamp"] = pd.to_datetime(df["Timestamp"]).dt.tz_localize("Asia/Manila")
 df["Age"] = now - df["Timestamp"]
 df["Active"] = df["Age"] < timedelta(minutes=15)
 
-
-# 🎨 Assign marker color
+# 🎨 Marker color
 def get_color(row):
     if row["SOS"] == "SOS":
         return [255, 0, 0, 200]
@@ -152,7 +154,7 @@ def get_color(row):
 
 df["Color"] = df.apply(get_color, axis=1)
 
-# 👁️ Visibility filter
+# 🔍 Filter visibility
 def get_visible_users():
     if st.session_state.sos_mode or st.session_state.mode == "Public":
         return df[df["Mode"] == "Public"]
@@ -163,7 +165,7 @@ def get_visible_users():
 
 visible_df = get_visible_users()
 
-# 🗺️ Display map
+# 🗺️ Map Display
 if not visible_df.empty:
     st.subheader("📍 Real-Time User Locations")
 
