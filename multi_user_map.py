@@ -67,12 +67,15 @@ def get_sheet():
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(FILE_ID)
     try:
-        return sh.worksheet("multi_geolocator_log")
+        ws = sh.worksheet("multi_geolocator_log")
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title="multi_geolocator_log", rows="1000", cols="8")
-        headers = ["Timestamp", "Email", "Latitude", "Longitude", "Elevation", "Mode", "SharedCode", "SOS"]
-        ws.insert_row(headers, 1)
-        return ws
+        ws.insert_row(["Timestamp", "Email", "Latitude", "Longitude", "Elevation", "Mode", "SharedCode", "SOS"], 1)
+    headers = ws.row_values(1)
+    expected_headers = ["Timestamp", "Email", "Latitude", "Longitude", "Elevation", "Mode", "SharedCode", "SOS"]
+    if headers != expected_headers:
+        ws.update("A1:H1", [expected_headers])
+    return ws
 
 def append_to_sheet(record):
     sheet = get_sheet()
@@ -80,6 +83,18 @@ def append_to_sheet(record):
     row = [record.get(h, "") for h in headers]
     if any(row):
         sheet.append_row(row, value_input_option="USER_ENTERED")
+
+def update_mode_for_email(email, new_mode):
+    sheet = get_sheet()
+    records = sheet.get_all_values()
+    headers = records[0]
+    updated_rows = []
+    for row in records[1:]:
+        if row and len(row) >= headers.index("Email") + 1 and row[headers.index("Email")] == email:
+            row[headers.index("Mode")] = new_mode
+        updated_rows.append(row)
+    sheet.batch_clear(["A2:H"])
+    sheet.insert_rows(updated_rows, row=2)
 
 @st.cache_data(ttl=60)
 def fetch_latest_locations():
@@ -111,14 +126,11 @@ with st.sidebar:
 
 origin_lat, origin_lon = default_origin()
 
-# Manual Refresh Button
 if st.button("📍 Refresh My Location"):
     st.session_state["streamlit_geolocation"] = None
 
-# Auto detect GPS
 data = streamlit_geolocation()
 
-# Log to sheet
 if data and email:
     lat = data.get("latitude")
     lon = data.get("longitude")
@@ -137,6 +149,7 @@ if data and email:
             "SOS": "YES" if sos else ""
         }
         append_to_sheet(record)
+        update_mode_for_email(email, "SOS" if sos else mode)
         with st.sidebar:
             st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
             st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
@@ -146,7 +159,6 @@ if data and email:
 else:
     st.info("Please allow GPS access and enter your email.")
 
-# Display map
 df_map = fetch_latest_locations()
 if not df_map.empty:
     if mode == "Private":
@@ -155,7 +167,6 @@ if not df_map.empty:
         df_map = df_map[df_map["Mode"] == "Public"]
 
     df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
-
     df_map["Color"] = df_map.apply(
         lambda row: [255, 0, 0] if row["SOS"] == "YES"
         else [255, 255, 0] if row["Mode"] == "Public"
@@ -194,7 +205,6 @@ if not df_map.empty:
         get_color=[0, 128, 255],
         get_width=2
     )
-
     deck = pdk.Deck(
         layers=[scatter, text, line],
         initial_view_state=view,
