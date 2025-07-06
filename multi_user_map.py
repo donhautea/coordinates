@@ -243,7 +243,9 @@ else:
         data=df_map,
         get_position="[lon, lat]",
         get_fill_color="Color",
-        get_radius=40,
+        radius_scale=5,
+        radius_min_pixels=4,
+        radius_max_pixels=20,
         pickable=True
     )
     text = pdk.Layer(
