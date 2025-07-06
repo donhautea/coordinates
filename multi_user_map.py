@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -56,7 +55,7 @@ def get_sheet():
         "type": st.secrets["gdrive"]["type"],
         "project_id": st.secrets["gdrive"]["project_id"],
         "private_key_id": st.secrets["gdrive"]["private_key_id"],
-        "private_key": st.secrets["gdrive"]["private_key"].replace('\n', '\n'),
+        "private_key": st.secrets["gdrive"]["private_key"].replace('\\n', '\n'),
         "client_email": st.secrets["gdrive"]["client_email"],
         "client_id": st.secrets["gdrive"]["client_id"],
         "auth_uri": st.secrets["gdrive"]["auth_uri"],
@@ -108,17 +107,17 @@ with st.sidebar:
     shared_code = st.text_input("Shared Code", value="group1" if mode == "Private" else "")
     show_public = st.checkbox("Also show public users", value=True)
     sos = st.checkbox("🚨 Emergency Mode (SOS)")
+    if st.button("📍 Refresh My Location"):
+        st.session_state["streamlit_geolocation"] = None
 
 origin_lat, origin_lon = default_origin()
 
-# Manual Refresh Button
-if st.button("📍 Refresh My Location"):
-    st.session_state["streamlit_geolocation"] = None
+# Reserved space to avoid layout shifting
+message_area = st.empty()
 
-# Auto detect GPS
+# Detect GPS
 data = streamlit_geolocation()
 
-# Log to sheet
 if data and email:
     lat = data.get("latitude")
     lon = data.get("longitude")
@@ -140,11 +139,11 @@ if data and email:
         with st.sidebar:
             st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
             st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
-        st.success("📌 Location logged.")
+        message_area.success("📌 Location logged successfully.")
     else:
-        st.warning("⚠️ GPS not available.")
+        message_area.warning("⚠️ GPS not available.")
 else:
-    st.info("Please allow GPS access and enter your email.")
+    message_area.info("Please allow GPS access and enter your email.")
 
 # Display map
 df_map = fetch_latest_locations()
@@ -183,7 +182,7 @@ if not df_map.empty:
         get_position="[lon, lat]",
         get_text="Email",
         get_size=12,
-        get_color=[173, 216, 230],
+        get_color=[255, 255, 0],
         get_alignment_baseline='"bottom"'
     )
     line = pdk.Layer(
@@ -200,6 +199,6 @@ if not df_map.empty:
         initial_view_state=view,
         tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
     )
-    st.pydeck_chart(deck, use_container_width=True)
+    st.pydeck_chart(deck, use_container_width=True, height=600)
 else:
-    st.info("No data available yet.")
+    st.info("No user data available yet.")
