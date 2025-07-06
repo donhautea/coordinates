@@ -181,6 +181,8 @@ if show_path and path_user:
         lambda row: [255, 0, 0, 255] if row["Timestamp"] > now - timedelta(minutes=15)
         else [150, 150, 150, 100], axis=1
     )
+    df_user_path["Label"] = df_user_path["Email"]
+
     scatter = pdk.Layer(
         "ScatterplotLayer",
         data=df_user_path,
@@ -192,12 +194,22 @@ if show_path and path_user:
         radius_max_pixels=20,
         pickable=True
     )
+    text = pdk.Layer(
+        "TextLayer",
+        data=df_user_path,
+        get_position="[lon, lat]",
+        get_text="Label",
+        get_size=10,
+        get_color=[255, 255, 255],
+        get_alignment_baseline='"bottom"'
+    )
     deck = pdk.Deck(
-        layers=[scatter],
+        layers=[scatter, text],
         initial_view_state=view,
         tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Time: {Timestamp}"}
     )
 else:
+    df_display["Label"] = df_display["Email"]
     scatter = pdk.Layer(
         "ScatterplotLayer",
         data=df_display,
@@ -209,8 +221,17 @@ else:
         radius_max_pixels=20,
         pickable=True
     )
+    text = pdk.Layer(
+        "TextLayer",
+        data=df_display,
+        get_position="[lon, lat]",
+        get_text="Label",
+        get_size=10,
+        get_color=[255, 255, 255],
+        get_alignment_baseline='"bottom"'
+    )
     deck = pdk.Deck(
-        layers=[scatter],
+        layers=[scatter, text],
         initial_view_state=view,
         tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
     )
