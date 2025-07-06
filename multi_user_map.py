@@ -94,20 +94,20 @@ def fetch_latest_locations():
     return df
 
 # ------------------------- UI -------------------------
-st.title("\ud83d\udccd Multi-User Geolocation Tracker with SOS and Path Viewer")
+st.title("📍 Multi-User Geolocation Tracker with SOS and Path Viewer")
 
 if "email" not in st.session_state:
     st.session_state["email"] = ""
 
 with st.sidebar:
-    st.header("\ud83d\udd12 Settings")
+    st.header("🔒 Settings")
     email = st.text_input("Enter your email:", value=st.session_state["email"])
     st.session_state["email"] = email
     mode = st.radio("Privacy Mode", ["Public", "Private"])
     shared_code = st.text_input("Shared Code", value="group1" if mode == "Private" else "")
     show_public = st.checkbox("Also show public users", value=True)
-    sos = st.checkbox("\ud83d\udea8 Emergency Mode (SOS)")
-    if st.button("\ud83d\udccd Refresh My Location"):
+    sos = st.checkbox("🚨 Emergency Mode (SOS)")
+    if st.button("📍 Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
     origin_user = None
@@ -125,7 +125,7 @@ with st.sidebar:
         else:
             st.info("No active users found with the same Shared Code.")
 
-    show_path = st.checkbox("\ud83d\uddfa Show path for user (today only)")
+    show_path = st.checkbox("🗺 Show path for user (today only)")
     path_user = None
     if show_path:
         all_users = df_all["Email"].unique().tolist()
@@ -160,5 +160,5 @@ if data and email:
         }
         append_to_sheet(record)
         with st.sidebar:
-            st.markdown(f"\ud83e\uddf1 **Your Coordinates:** `{lat}, {lon}`")
-            st.markdown(f"\ud83d\udccd **Distance to Origin:** `{distance_km} km`")
+            st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
+            st.markdown(f"📍 **Distance to Origin:** `{distance_km} km`")
