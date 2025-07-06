@@ -125,7 +125,7 @@ with st.sidebar:
         else:
             st.info("No active users found with the same Shared Code.")
 
-    show_path = st.checkbox("🗺 Show path for user (today only)")
+    show_path = st.checkbox("🗺 Show path for user (past 24 hours)")
     path_user = None
     if show_path:
         all_users = df_all["Email"].unique().tolist()
@@ -167,19 +167,46 @@ if data and email:
 df_display = fetch_latest_locations()
 view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
 
-scatter = pdk.Layer(
-    "ScatterplotLayer",
-    data=df_display,
-    get_position="[lon, lat]",
-    get_radius=40,
-    get_fill_color="[255, 165, 0]",
-    pickable=True
-)
-
-deck = pdk.Deck(
-    layers=[scatter],
-    initial_view_state=view,
-    tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
-)
+if show_path and path_user:
+    now = datetime.now(PH_TIMEZONE)
+    df_user_path = df_display[(df_display["Email"] == path_user) &
+                              (df_display["Timestamp"] > now - timedelta(hours=24))].copy()
+    df_user_path["Color"] = df_user_path.apply(
+        lambda row: [255, 0, 0, 255] if row["Timestamp"] > now - timedelta(minutes=15)
+        else [150, 150, 150, 100], axis=1
+    )
+    scatter = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_user_path,
+        get_position="[lon, lat]",
+        get_fill_color="Color",
+        get_radius=40,
+        radius_scale=5,
+        radius_min_pixels=4,
+        radius_max_pixels=20,
+        pickable=True
+    )
+    deck = pdk.Deck(
+        layers=[scatter],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Time: {Timestamp}"}
+    )
+else:
+    scatter = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_display,
+        get_position="[lon, lat]",
+        get_fill_color="[255, 165, 0]",
+        get_radius=40,
+        radius_scale=5,
+        radius_min_pixels=4,
+        radius_max_pixels=20,
+        pickable=True
+    )
+    deck = pdk.Deck(
+        layers=[scatter],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
+    )
 
 st.pydeck_chart(deck, use_container_width=True)
