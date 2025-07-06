@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import gspread
+import random
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -97,7 +98,6 @@ st.title("📍 Multi-User Geolocation Tracker with SOS and Privacy Settings")
 df_active_users = fetch_latest_locations()
 df_active_users = df_active_users[df_active_users["Active"]]
 
-# Sidebar settings
 with st.sidebar:
     st.header("🔒 Settings")
     email = st.text_input("Enter your email:")
@@ -108,7 +108,6 @@ with st.sidebar:
     if st.button("📍 Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
-    # Filter origin user only by same Shared Code
     origin_user = None
     if mode == "Private" and shared_code and not df_active_users.empty:
         private_users = df_active_users[
@@ -128,10 +127,9 @@ if mode == "Private" and origin_user:
 else:
     origin_lat, origin_lon = default_origin()
 
-# Reserved message container
 message_area = st.empty()
 
-# Detect GPS
+# GPS Detection
 data = streamlit_geolocation()
 
 if data and email:
@@ -147,7 +145,7 @@ if data and email:
             "Latitude": lat,
             "Longitude": lon,
             "Elevation": elev,
-            "Mode": "SOS" if sos else mode,
+            "Mode": "Public" if sos else mode,
             "SharedCode": shared_code if mode == "Private" else "",
             "SOS": "YES" if sos else ""
         }
@@ -161,7 +159,7 @@ if data and email:
 else:
     message_area.info("Please allow GPS access and enter your email.")
 
-# Display map
+# Map
 df_map = fetch_latest_locations()
 if not df_map.empty:
     if mode == "Private":
@@ -171,11 +169,12 @@ if not df_map.empty:
 
     df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
 
+    # Blinking SOS: red with alternating opacity
     df_map["Color"] = df_map.apply(
-        lambda row: [255, 0, 0] if row["SOS"] == "YES"
-        else [255, 255, 0] if row["Mode"] == "Public"
-        else [100, 100, 100] if not row["Active"]
-        else [0, 255, 0], axis=1
+        lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
+        else [255, 255, 0, 200] if row["Mode"] == "Public"
+        else [100, 100, 100, 100] if not row["Active"]
+        else [0, 255, 0, 200], axis=1
     )
 
     df_lines = pd.DataFrame([
