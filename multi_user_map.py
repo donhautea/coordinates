@@ -184,7 +184,7 @@ if show_path and path_user:
             data=df_user_path,
             get_position="[lon, lat]",
             get_fill_color="Color",
-            get_radius=20,
+            get_radius=10,
             pickable=True
         )
         text = pdk.Layer(
