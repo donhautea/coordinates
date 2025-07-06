@@ -18,7 +18,7 @@ FILE_ID = st.secrets["gdrive"]["file_id"]
 
 # ------------------------- HELPERS -------------------------
 def default_origin():
-    return 14.6019, 120.9896
+    return 14.64171, 121.05078
 
 def get_elevation(lat, lon):
     try:
@@ -28,13 +28,6 @@ def get_elevation(lat, lon):
     except:
         pass
     return None
-
-def reverse_geocode(lat, lon):
-    try:
-        loc = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
-        return loc.address if loc else None
-    except:
-        return None
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371.0
@@ -100,6 +93,11 @@ def fetch_latest_locations():
 # ------------------------- UI + MAP -------------------------
 st.title("📍 Multi-User Geolocation Tracker with SOS and Privacy Settings")
 
+# Pre-fetch user data
+df_active_users = fetch_latest_locations()
+df_active_users = df_active_users[df_active_users["Active"]]
+
+# Sidebar settings
 with st.sidebar:
     st.header("🔒 Settings")
     email = st.text_input("Enter your email:")
@@ -110,9 +108,27 @@ with st.sidebar:
     if st.button("📍 Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
-origin_lat, origin_lon = default_origin()
+    # Filter origin user only by same Shared Code
+    origin_user = None
+    if mode == "Private" and shared_code and not df_active_users.empty:
+        private_users = df_active_users[
+            (df_active_users["Mode"].isin(["Private", "SOS"])) &
+            (df_active_users["SharedCode"] == shared_code)
+        ]
+        origin_options = private_users["Email"].tolist()
+        if origin_options:
+            origin_user = st.selectbox("Select Origin User", options=origin_options)
+        else:
+            st.info("No active users found with the same Shared Code.")
 
-# Reserved space to avoid layout shifting
+# Determine origin
+if mode == "Private" and origin_user:
+    user_row = df_active_users[df_active_users["Email"] == origin_user].iloc[0]
+    origin_lat, origin_lon = user_row["lat"], user_row["lon"]
+else:
+    origin_lat, origin_lon = default_origin()
+
+# Reserved message container
 message_area = st.empty()
 
 # Detect GPS
