@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import requests
 import gspread
@@ -13,6 +14,8 @@ import math
 
 # ------------------------- CONFIG -------------------------
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
+st_autorefresh(interval=60 * 1000, key="auto_refresh")  # Refresh every 60 seconds
+
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 FILE_ID = st.secrets["gdrive"]["file_id"]
@@ -91,23 +94,26 @@ def fetch_latest_locations():
     return df
 
 # ------------------------- UI -------------------------
-st.title("📍 Multi-User Geolocation Tracker with SOS and Path Viewer")
+st.title("\ud83d\udccd Multi-User Geolocation Tracker with SOS and Path Viewer")
 
-df_all = fetch_latest_locations()
-df_active_users = df_all[df_all["Active"]]
+if "email" not in st.session_state:
+    st.session_state["email"] = ""
 
 with st.sidebar:
-    st.header("🔒 Settings")
-    email = st.text_input("Enter your email:")
+    st.header("\ud83d\udd12 Settings")
+    email = st.text_input("Enter your email:", value=st.session_state["email"])
+    st.session_state["email"] = email
     mode = st.radio("Privacy Mode", ["Public", "Private"])
     shared_code = st.text_input("Shared Code", value="group1" if mode == "Private" else "")
     show_public = st.checkbox("Also show public users", value=True)
-    sos = st.checkbox("🚨 Emergency Mode (SOS)")
-    if st.button("📍 Refresh My Location"):
+    sos = st.checkbox("\ud83d\udea8 Emergency Mode (SOS)")
+    if st.button("\ud83d\udccd Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
-    # Origin user selection
     origin_user = None
+    df_all = fetch_latest_locations()
+    df_active_users = df_all[df_all["Active"]]
+
     if mode == "Private" and shared_code and not df_active_users.empty:
         private_users = df_active_users[
             (df_active_users["Mode"].isin(["Private", "SOS"])) &
@@ -119,21 +125,18 @@ with st.sidebar:
         else:
             st.info("No active users found with the same Shared Code.")
 
-    # Optional: View path of a user for today
-    show_path = st.checkbox("🗺 Show path for user (today only)")
+    show_path = st.checkbox("\ud83d\uddfa Show path for user (today only)")
     path_user = None
     if show_path:
         all_users = df_all["Email"].unique().tolist()
         path_user = st.selectbox("Select user for path", options=all_users)
 
-# Determine origin coordinates
 if mode == "Private" and origin_user:
     user_row = df_active_users[df_active_users["Email"] == origin_user].iloc[0]
     origin_lat, origin_lon = user_row["lat"], user_row["lon"]
 else:
     origin_lat, origin_lon = default_origin()
 
-# GPS Logging
 message_area = st.empty()
 data = streamlit_geolocation()
 
@@ -156,15 +159,14 @@ if data and email:
         }
         append_to_sheet(record)
         with st.sidebar:
-            st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
-            st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
-        message_area.success("📌 Location logged successfully.")
+            st.markdown(f"\ud83e\uddf1 **Your Coordinates:** `{lat}, {lon}`")
+            st.markdown(f"\ud83d\udccd **Distance to Origin:** `{distance_km} km`")
+        message_area.success("\ud83d\udccc Location logged successfully.")
     else:
-        message_area.warning("⚠️ GPS not available.")
+        message_area.warning("\u26a0\ufe0f GPS not available.")
 else:
     message_area.info("Please allow GPS access and enter your email.")
 
-# ------------------------- Map Rendering -------------------------
 view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
 
 if show_path and path_user:
