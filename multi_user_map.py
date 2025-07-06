@@ -88,15 +88,13 @@ def fetch_latest_locations():
     df["lat"] = df["Latitude"]
     df["lon"] = df["Longitude"]
     df.sort_values("Timestamp", ascending=True, inplace=True)
-    df = df.drop_duplicates(subset="Email", keep="last")
     return df
 
-# ------------------------- UI + MAP -------------------------
-st.title("📍 Multi-User Geolocation Tracker with SOS and Privacy Settings")
+# ------------------------- UI -------------------------
+st.title("📍 Multi-User Geolocation Tracker with SOS and Path Viewer")
 
-# Pre-fetch user data
-df_active_users = fetch_latest_locations()
-df_active_users = df_active_users[df_active_users["Active"]]
+df_all = fetch_latest_locations()
+df_active_users = df_all[df_all["Active"]]
 
 with st.sidebar:
     st.header("🔒 Settings")
@@ -108,28 +106,35 @@ with st.sidebar:
     if st.button("📍 Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
+    # Origin user selection
     origin_user = None
     if mode == "Private" and shared_code and not df_active_users.empty:
         private_users = df_active_users[
             (df_active_users["Mode"].isin(["Private", "SOS"])) &
             (df_active_users["SharedCode"] == shared_code)
         ]
-        origin_options = private_users["Email"].tolist()
+        origin_options = private_users["Email"].unique().tolist()
         if origin_options:
             origin_user = st.selectbox("Select Origin User", options=origin_options)
         else:
             st.info("No active users found with the same Shared Code.")
 
-# Determine origin
+    # Optional: View path of a user for today
+    show_path = st.checkbox("🗺 Show path for user (today only)")
+    path_user = None
+    if show_path:
+        all_users = df_all["Email"].unique().tolist()
+        path_user = st.selectbox("Select user for path", options=all_users)
+
+# Determine origin coordinates
 if mode == "Private" and origin_user:
     user_row = df_active_users[df_active_users["Email"] == origin_user].iloc[0]
     origin_lat, origin_lon = user_row["lat"], user_row["lon"]
 else:
     origin_lat, origin_lon = default_origin()
 
+# GPS Logging
 message_area = st.empty()
-
-# GPS Detection
 data = streamlit_geolocation()
 
 if data and email:
@@ -159,61 +164,95 @@ if data and email:
 else:
     message_area.info("Please allow GPS access and enter your email.")
 
-# Map
-df_map = fetch_latest_locations()
-if not df_map.empty:
-    if mode == "Private":
-        df_map = df_map[((df_map["Mode"] == "Public") & show_public) | (df_map["SharedCode"] == shared_code)]
-    elif mode == "Public":
-        df_map = df_map[df_map["Mode"] == "Public"]
+# ------------------------- Map Rendering -------------------------
+df_map = df_all.copy()
 
-    df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
+if mode == "Private":
+    df_map = df_map[((df_map["Mode"] == "Public") & show_public) | (df_map["SharedCode"] == shared_code)]
+elif mode == "Public":
+    df_map = df_map[df_map["Mode"] == "Public"]
 
-    # Blinking SOS: red with alternating opacity
-    df_map["Color"] = df_map.apply(
-        lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
-        else [255, 255, 0, 200] if row["Mode"] == "Public"
-        else [100, 100, 100, 100] if not row["Active"]
-        else [0, 255, 0, 200], axis=1
-    )
+# Compute map colors and lines
+df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
 
-    df_lines = pd.DataFrame([
-        {"start_lat": origin_lat, "start_lon": origin_lon, "end_lat": row.lat, "end_lon": row.lon}
-        for _, row in df_map.iterrows()
-    ])
-    view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
+df_map["Color"] = df_map.apply(
+    lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
+    else [100, 100, 100, 100] if not row["Active"]
+    else [255, 255, 0, 200] if row["Mode"] == "Public"
+    else [0, 255, 0, 200], axis=1
+)
 
-    scatter = pdk.Layer(
-        "ScatterplotLayer",
-        data=df_map,
-        get_position="[lon, lat]",
-        get_fill_color="Color",
-        get_radius=40,
-        pickable=True
-    )
-    text = pdk.Layer(
-        "TextLayer",
-        data=df_map,
-        get_position="[lon, lat]",
-        get_text="Email",
-        get_size=12,
-        get_color=[255, 255, 0],
-        get_alignment_baseline='"bottom"'
-    )
-    line = pdk.Layer(
-        "LineLayer",
-        data=df_lines,
-        get_source_position=["start_lon", "start_lat"],
-        get_target_position=["end_lon", "end_lat"],
-        get_color=[0, 128, 255],
-        get_width=2
-    )
+df_map["LineColor"] = df_map.apply(
+    lambda row: [100, 100, 100] if not row["Active"] else [0, 128, 255], axis=1
+)
 
-    deck = pdk.Deck(
-        layers=[scatter, text, line],
-        initial_view_state=view,
-        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
-    )
-    st.pydeck_chart(deck, use_container_width=True, height=600)
-else:
-    st.info("No user data available yet.")
+df_lines = pd.DataFrame([
+    {
+        "start_lat": origin_lat,
+        "start_lon": origin_lon,
+        "end_lat": row.lat,
+        "end_lon": row.lon,
+        "color": row.LineColor
+    }
+    for _, row in df_map.iterrows()
+])
+
+view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
+
+# Layers
+scatter = pdk.Layer(
+    "ScatterplotLayer",
+    data=df_map,
+    get_position="[lon, lat]",
+    get_fill_color="Color",
+    get_radius=40,
+    pickable=True
+)
+text = pdk.Layer(
+    "TextLayer",
+    data=df_map,
+    get_position="[lon, lat]",
+    get_text="Email",
+    get_size=12,
+    get_color=[255, 255, 0],
+    get_alignment_baseline='"bottom"'
+)
+line = pdk.Layer(
+    "LineLayer",
+    data=df_lines,
+    get_source_position=["start_lon", "start_lat"],
+    get_target_position=["end_lon", "end_lat"],
+    get_color="color",
+    get_width=2
+)
+
+# Optional path layer
+path_layer = None
+if path_user:
+    today = datetime.now(PH_TIMEZONE).date()
+    df_user_path = df_all[
+        (df_all["Email"] == path_user) & (df_all["Timestamp"].dt.date == today)
+    ].sort_values("Timestamp")
+    if len(df_user_path) >= 2:
+        path_layer = pdk.Layer(
+            "PathLayer",
+            data=[{
+                "path": list(zip(df_user_path["lon"], df_user_path["lat"])),
+                "color": [255, 165, 0]
+            }],
+            get_path="path",
+            get_color="color",
+            width_scale=10,
+            width_min_pixels=2
+        )
+
+layers = [scatter, text, line]
+if path_layer:
+    layers.append(path_layer)
+
+deck = pdk.Deck(
+    layers=layers,
+    initial_view_state=view,
+    tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
+)
+st.pydeck_chart(deck, use_container_width=True, height=600)
