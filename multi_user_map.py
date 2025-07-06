@@ -165,94 +165,106 @@ else:
     message_area.info("Please allow GPS access and enter your email.")
 
 # ------------------------- Map Rendering -------------------------
-df_map = df_all.copy()
-
-if mode == "Private":
-    df_map = df_map[((df_map["Mode"] == "Public") & show_public) | (df_map["SharedCode"] == shared_code)]
-elif mode == "Public":
-    df_map = df_map[df_map["Mode"] == "Public"]
-
-# Compute map colors and lines
-df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
-
-df_map["Color"] = df_map.apply(
-    lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
-    else [100, 100, 100, 100] if not row["Active"]
-    else [255, 255, 0, 200] if row["Mode"] == "Public"
-    else [0, 255, 0, 200], axis=1
-)
-
-df_map["LineColor"] = df_map.apply(
-    lambda row: [100, 100, 100] if not row["Active"] else [0, 128, 255], axis=1
-)
-
-df_lines = pd.DataFrame([
-    {
-        "start_lat": origin_lat,
-        "start_lon": origin_lon,
-        "end_lat": row.lat,
-        "end_lon": row.lon,
-        "color": row.LineColor
-    }
-    for _, row in df_map.iterrows()
-])
-
 view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
 
-# Layers
-scatter = pdk.Layer(
-    "ScatterplotLayer",
-    data=df_map,
-    get_position="[lon, lat]",
-    get_fill_color="Color",
-    get_radius=40,
-    pickable=True
-)
-text = pdk.Layer(
-    "TextLayer",
-    data=df_map,
-    get_position="[lon, lat]",
-    get_text="Email",
-    get_size=12,
-    get_color=[255, 255, 0],
-    get_alignment_baseline='"bottom"'
-)
-line = pdk.Layer(
-    "LineLayer",
-    data=df_lines,
-    get_source_position=["start_lon", "start_lat"],
-    get_target_position=["end_lon", "end_lat"],
-    get_color="color",
-    get_width=2
-)
-
-# Optional path layer
-path_layer = None
-if path_user:
+if show_path and path_user:
     today = datetime.now(PH_TIMEZONE).date()
     df_user_path = df_all[
         (df_all["Email"] == path_user) & (df_all["Timestamp"].dt.date == today)
     ].sort_values("Timestamp")
-    if len(df_user_path) >= 2:
-        path_layer = pdk.Layer(
-            "PathLayer",
-            data=[{
-                "path": list(zip(df_user_path["lon"], df_user_path["lat"])),
-                "color": [255, 165, 0]
-            }],
-            get_path="path",
-            get_color="color",
-            width_scale=10,
-            width_min_pixels=2
+
+    if not df_user_path.empty:
+        df_user_path["Color"] = df_user_path.apply(
+            lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
+            else [0, 200, 255, 200], axis=1
         )
 
-layers = [scatter, text, line]
-if path_layer:
-    layers.append(path_layer)
+        scatter = pdk.Layer(
+            "ScatterplotLayer",
+            data=df_user_path,
+            get_position="[lon, lat]",
+            get_fill_color="Color",
+            get_radius=40,
+            pickable=True
+        )
+        text = pdk.Layer(
+            "TextLayer",
+            data=df_user_path,
+            get_position="[lon, lat]",
+            get_text="Timestamp",
+            get_size=10,
+            get_color=[255, 255, 255],
+            get_alignment_baseline='"bottom"'
+        )
 
-deck = pdk.Deck(
-    layers=layers,
-    initial_view_state=view,
-    tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
-)
-st.pydeck_chart(deck, use_container_width=True, height=600)
+        deck = pdk.Deck(
+            layers=[scatter, text],
+            initial_view_state=view,
+            tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Time: {Timestamp}"}
+        )
+        st.pydeck_chart(deck, use_container_width=True, height=600)
+    else:
+        st.warning("No location records found for today.")
+else:
+    df_map = df_all.copy()
+
+    if mode == "Private":
+        df_map = df_map[((df_map["Mode"] == "Public") & show_public) | (df_map["SharedCode"] == shared_code)]
+    elif mode == "Public":
+        df_map = df_map[df_map["Mode"] == "Public"]
+
+    df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
+
+    df_map["Color"] = df_map.apply(
+        lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
+        else [100, 100, 100, 100] if not row["Active"]
+        else [255, 255, 0, 200] if row["Mode"] == "Public"
+        else [0, 255, 0, 200], axis=1
+    )
+    df_map["LineColor"] = df_map.apply(
+        lambda row: [100, 100, 100] if not row["Active"] else [0, 128, 255], axis=1
+    )
+
+    df_lines = pd.DataFrame([
+        {
+            "start_lat": origin_lat,
+            "start_lon": origin_lon,
+            "end_lat": row.lat,
+            "end_lon": row.lon,
+            "color": row.LineColor
+        }
+        for _, row in df_map.iterrows()
+    ])
+
+    scatter = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_map,
+        get_position="[lon, lat]",
+        get_fill_color="Color",
+        get_radius=40,
+        pickable=True
+    )
+    text = pdk.Layer(
+        "TextLayer",
+        data=df_map,
+        get_position="[lon, lat]",
+        get_text="Email",
+        get_size=12,
+        get_color=[255, 255, 0],
+        get_alignment_baseline='"bottom"'
+    )
+    line = pdk.Layer(
+        "LineLayer",
+        data=df_lines,
+        get_source_position=["start_lon", "start_lat"],
+        get_target_position=["end_lon", "end_lat"],
+        get_color="color",
+        get_width=2
+    )
+
+    deck = pdk.Deck(
+        layers=[scatter, text, line],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
+    )
+    st.pydeck_chart(deck, use_container_width=True, height=600)
