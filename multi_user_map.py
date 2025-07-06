@@ -177,10 +177,11 @@ if show_path and path_user:
     now = datetime.now(PH_TIMEZONE)
     df_user_path = df_display[(df_display["Email"] == path_user) &
                               (df_display["Timestamp"] > now - timedelta(hours=24))].copy()
-    df_user_path["Color"] = df_user_path.apply(
-        lambda row: [255, 0, 0, 255] if row["Timestamp"] > now - timedelta(minutes=15)
-        else [150, 150, 150, 100], axis=1
-    )
+    df_user_path.sort_values("Timestamp", inplace=True)
+    df_user_path["Color"] = [
+        [150, 150, 150, 100] if i < len(df_user_path)-1 else [255, 0, 0, 255] 
+        for i in range(len(df_user_path))
+    ]
     df_user_path["Label"] = df_user_path["Email"]
 
     scatter = pdk.Layer(
