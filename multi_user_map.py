@@ -165,7 +165,13 @@ if data and email:
 
 # Ensure map is displayed even after refresh
 df_display = fetch_latest_locations()
-view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
+
+# Determine zoom focus on user's latest coordinate if available
+if email in df_display["Email"].values:
+    user_latest = df_display[df_display["Email"] == email].sort_values("Timestamp", ascending=False).iloc[0]
+    view = pdk.ViewState(latitude=user_latest["lat"], longitude=user_latest["lon"], zoom=14)
+else:
+    view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
 
 if show_path and path_user:
     now = datetime.now(PH_TIMEZONE)
