@@ -162,3 +162,24 @@ if data and email:
         with st.sidebar:
             st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
             st.markdown(f"📍 **Distance to Origin:** `{distance_km} km`")
+
+# Ensure map is displayed even after refresh
+df_display = fetch_latest_locations()
+view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
+
+scatter = pdk.Layer(
+    "ScatterplotLayer",
+    data=df_display,
+    get_position="[lon, lat]",
+    get_radius=40,
+    get_fill_color="[255, 165, 0]",
+    pickable=True
+)
+
+deck = pdk.Deck(
+    layers=[scatter],
+    initial_view_state=view,
+    tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
+)
+
+st.pydeck_chart(deck, use_container_width=True)
