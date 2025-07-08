@@ -177,6 +177,7 @@ if data and email:
             st.markdown(f"📍 **Your Coordinates:** `{lat}, {lon}`")
             st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
 
+# View filtering logic
 view_data = fetch_latest_locations()
 if mode == "Private" and shared_code:
     view_data = view_data[
@@ -189,7 +190,18 @@ elif mode == "Public":
 else:
     view_data = view_data.iloc[0:0]
 
+# Fallback if empty
+if view_data.empty:
+    st.warning("⚠️ No valid coordinates to show. Adding dummy marker at origin for verification.")
+    view_data = pd.DataFrame([{
+        "Email": "No Active Users",
+        "lat": origin_lat,
+        "lon": origin_lon
+    }])
+
 view_data["Label"] = view_data["Email"]
+
+# Build map layers
 scatter = pdk.Layer(
     "ScatterplotLayer",
     data=view_data,
@@ -211,46 +223,13 @@ text = pdk.Layer(
     get_alignment_baseline='"bottom"'
 )
 
-if email in view_data["Email"].values:
-    user_latest = view_data[view_data["Email"] == email].sort_values("Timestamp", ascending=False).iloc[0]
-    view = pdk.ViewState(latitude=user_latest["lat"], longitude=user_latest["lon"], zoom=14)
-else:
-    view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
+view = pdk.ViewState(
+    latitude=view_data["lat"].iloc[-1],
+    longitude=view_data["lon"].iloc[-1],
+    zoom=14
+)
 
 layers = [scatter, text]
-
-if show_path and path_user:
-    now = datetime.now(PH_TIMEZONE)
-    df_user_path = fetch_latest_locations()
-    df_user_path = df_user_path[(df_user_path["Email"] == path_user) & (df_user_path["Timestamp"] > now - timedelta(hours=24))].copy()
-    df_user_path.sort_values("Timestamp", inplace=True)
-    df_user_path["Color"] = [
-        [150, 150, 150, 100] if i < len(df_user_path)-1 else [255, 0, 0, 255] 
-        for i in range(len(df_user_path))
-    ]
-    df_user_path["Label"] = df_user_path["Email"]
-
-    path_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=df_user_path,
-        get_position="[lon, lat]",
-        get_fill_color="Color",
-        get_radius=40,
-        radius_scale=5,
-        radius_min_pixels=4,
-        radius_max_pixels=20,
-        pickable=True
-    )
-    text_layer = pdk.Layer(
-        "TextLayer",
-        data=df_user_path,
-        get_position="[lon, lat]",
-        get_text="Label",
-        get_size=10,
-        get_color=[255, 255, 255],
-        get_alignment_baseline='"bottom"'
-    )
-    layers.extend([path_layer, text_layer])
 
 st.pydeck_chart(pdk.Deck(
     layers=layers,
