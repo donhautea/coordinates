@@ -86,12 +86,14 @@ def fetch_latest_locations():
         return pd.DataFrame()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce").dt.tz_localize(PH_TIMEZONE)
     now = datetime.now(PH_TIMEZONE)
+    df = df[df["Timestamp"] > now - timedelta(hours=1)]  # Only include entries within the past 1 hour
     df["Age"] = now - df["Timestamp"]
     df["Active"] = df["Age"] < timedelta(minutes=15)
     df["lat"] = df["Latitude"]
     df["lon"] = df["Longitude"]
     df.sort_values("Timestamp", ascending=True, inplace=True)
     return df
+
 
 # ------------------------- UI -------------------------
 st.title("\U0001F4CD Multi-User Geolocation Tracker with SOS and Path Viewer")
