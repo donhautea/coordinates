@@ -11,7 +11,10 @@ from geopy.geocoders import Nominatim
 import pydeck as pdk
 from streamlit_geolocation import streamlit_geolocation
 import math
+import pydeck as pdk
 
+
+pdk.settings.mapbox_api_key = st.secrets["mapbox"]["token"]
 # ------------------------- CONFIG -------------------------
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
 st_autorefresh(interval=10 * 1000, key="auto_refresh")  # Refresh every 10 seconds
