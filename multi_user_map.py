@@ -14,7 +14,7 @@ import math
 
 # ------------------------- CONFIG -------------------------
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
-st_autorefresh(interval=60 * 1000, key="auto_refresh")  # Refresh every 60 seconds
+st_autorefresh(interval=10 * 1000, key="auto_refresh")  # Refresh every 10 seconds
 
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
@@ -96,7 +96,7 @@ def fetch_latest_locations():
 
 
 # ------------------------- UI -------------------------
-st.title("\U0001F4CD Multi-User Geolocation Tracker with SOS and Path Viewer")
+st.title("\U0001F4CD Multi-User Geolocation Tracker")
 
 if "email" not in st.session_state:
     st.session_state["email"] = ""
