@@ -11,10 +11,7 @@ from geopy.geocoders import Nominatim
 import pydeck as pdk
 from streamlit_geolocation import streamlit_geolocation
 import math
-import pydeck as pdk
 
-
-pdk.settings.mapbox_api_key = st.secrets["mapbox"]["token"]
 # ------------------------- CONFIG -------------------------
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
 st_autorefresh(interval=10 * 1000, key="auto_refresh")  # Refresh every 10 seconds
@@ -22,6 +19,7 @@ st_autorefresh(interval=10 * 1000, key="auto_refresh")  # Refresh every 10 secon
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 FILE_ID = st.secrets["gdrive"]["file_id"]
+pdk.settings.mapbox_api_key = st.secrets["mapbox"]["token"]
 
 # ------------------------- HELPERS -------------------------
 def default_origin():
@@ -89,11 +87,12 @@ def fetch_latest_locations():
         return pd.DataFrame()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce").dt.tz_localize(PH_TIMEZONE)
     now = datetime.now(PH_TIMEZONE)
-    df = df[df["Timestamp"] > now - timedelta(hours=1)]  # Only include entries within the past 1 hour
+    df = df[df["Timestamp"] > now - timedelta(hours=1)]
     df["Age"] = now - df["Timestamp"]
     df["Active"] = df["Age"] < timedelta(minutes=15)
-    df["lat"] = df["Latitude"]
-    df["lon"] = df["Longitude"]
+    df["lat"] = pd.to_numeric(df["Latitude"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["Longitude"], errors="coerce")
+    df = df.dropna(subset=["lat", "lon"])
     df.sort_values("Timestamp", ascending=True, inplace=True)
     return df
 
