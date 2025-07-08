@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import requests
 import gspread
@@ -14,8 +13,6 @@ import math
 
 # ------------------------- CONFIG -------------------------
 st.set_page_config(page_title="Multi-User Geolocation Map", layout="wide")
-st_autorefresh(interval=60 * 1000, key="auto_refresh")  # Refresh every 60 seconds
-
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 FILE_ID = st.secrets["gdrive"]["file_id"]
@@ -91,18 +88,19 @@ def fetch_latest_locations():
     df["lat"] = df["Latitude"]
     df["lon"] = df["Longitude"]
     df.sort_values("Timestamp", ascending=True, inplace=True)
+    df = df.drop_duplicates(subset="Email", keep="last")
     return df
 
-# ------------------------- UI -------------------------
-st.title("📍 Multi-User Geolocation Tracker with SOS and Path Viewer")
+# ------------------------- UI + MAP -------------------------
+st.title("📍 Multi-User Geolocation Tracker with SOS and Privacy Settings")
 
-if "email" not in st.session_state:
-    st.session_state["email"] = ""
+# Pre-fetch user data
+df_active_users = fetch_latest_locations()
+df_active_users = df_active_users[df_active_users["Active"]]
 
 with st.sidebar:
     st.header("🔒 Settings")
-    email = st.text_input("Enter your email:", value=st.session_state["email"])
-    st.session_state["email"] = email
+    email = st.text_input("Enter your email:")
     mode = st.radio("Privacy Mode", ["Public", "Private"])
     shared_code = st.text_input("Shared Code", value="group1" if mode == "Private" else "")
     show_public = st.checkbox("Also show public users", value=True)
@@ -111,34 +109,27 @@ with st.sidebar:
         st.session_state["streamlit_geolocation"] = None
 
     origin_user = None
-    df_all = fetch_latest_locations()
-    df_active_users = df_all[df_all["Active"]]
-
     if mode == "Private" and shared_code and not df_active_users.empty:
         private_users = df_active_users[
             (df_active_users["Mode"].isin(["Private", "SOS"])) &
             (df_active_users["SharedCode"] == shared_code)
         ]
-        origin_options = private_users["Email"].unique().tolist()
+        origin_options = private_users["Email"].tolist()
         if origin_options:
             origin_user = st.selectbox("Select Origin User", options=origin_options)
         else:
             st.info("No active users found with the same Shared Code.")
 
-    show_path = st.checkbox("🗺 Show path for user (past 24 hours)")
-    path_user = None
-    if show_path:
-        all_users = df_all["Email"].unique().tolist()
-        path_user = st.selectbox("Select user for path", options=all_users)
-
+# Determine origin
 if mode == "Private" and origin_user:
     user_row = df_active_users[df_active_users["Email"] == origin_user].iloc[0]
     origin_lat, origin_lon = user_row["lat"], user_row["lon"]
 else:
     origin_lat, origin_lon = default_origin()
 
-# Automatically get geolocation and log it every refresh
-email = st.session_state.get("email", "")
+message_area = st.empty()
+
+# GPS Detection
 data = streamlit_geolocation()
 
 if data and email:
@@ -161,80 +152,75 @@ if data and email:
         append_to_sheet(record)
         with st.sidebar:
             st.markdown(f"🧭 **Your Coordinates:** `{lat}, {lon}`")
-            st.markdown(f"📍 **Distance to Origin:** `{distance_km} km`")
-
-# Ensure map is displayed even after refresh
-df_display = fetch_latest_locations()
-
-# Determine zoom focus on user's latest coordinate if available
-if email in df_display["Email"].values:
-    user_latest = df_display[df_display["Email"] == email].sort_values("Timestamp", ascending=False).iloc[0]
-    view = pdk.ViewState(latitude=user_latest["lat"], longitude=user_latest["lon"], zoom=14)
+            st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
+        message_area.success("📌 Location logged successfully.")
+    else:
+        message_area.warning("⚠️ GPS not available.")
 else:
-    view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
+    message_area.info("Please allow GPS access and enter your email.")
 
-if show_path and path_user:
-    now = datetime.now(PH_TIMEZONE)
-    df_user_path = df_display[(df_display["Email"] == path_user) &
-                              (df_display["Timestamp"] > now - timedelta(hours=24))].copy()
-    df_user_path.sort_values("Timestamp", inplace=True)
-    df_user_path["Color"] = [
-        [150, 150, 150, 100] if i < len(df_user_path)-1 else [255, 0, 0, 255] 
-        for i in range(len(df_user_path))
-    ]
-    df_user_path["Label"] = df_user_path["Email"]
+# Map
+df_map = fetch_latest_locations()
+if not df_map.empty:
+    if mode == "Private" and shared_code:
+        df_map = df_map[
+            ((df_map["Mode"] == "Private") & (df_map["SharedCode"] == shared_code)) |
+            ((df_map["Mode"] == "SOS") & (df_map["SharedCode"] == shared_code)) |
+            ((df_map["Mode"] == "Public") & show_public)
+        ]
+    elif mode == "Public":
+        df_map = df_map[df_map["Mode"] == "Public"]
+    else:
+        # If mode is unset or email not provided, show nothing
+        df_map = df_map.iloc[0:0]
+
+    df_map["Distance_km"] = df_map.apply(lambda row: round(haversine(origin_lat, origin_lon, row.lat, row.lon), 2), axis=1)
+
+    # Blinking SOS: red with alternating opacity
+    df_map["Color"] = df_map.apply(
+        lambda row: [255, 0, 0, 255 if random.choice([True, False]) else 50] if row["SOS"] == "YES"
+        else [255, 255, 0, 200] if row["Mode"] == "Public"
+        else [100, 100, 100, 100] if not row["Active"]
+        else [0, 255, 0, 200], axis=1
+    )
+
+    df_lines = pd.DataFrame([
+        {"start_lat": origin_lat, "start_lon": origin_lon, "end_lat": row.lat, "end_lon": row.lon}
+        for _, row in df_map.iterrows()
+    ])
+    view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
 
     scatter = pdk.Layer(
         "ScatterplotLayer",
-        data=df_user_path,
+        data=df_map,
         get_position="[lon, lat]",
         get_fill_color="Color",
         get_radius=40,
-        radius_scale=5,
-        radius_min_pixels=4,
-        radius_max_pixels=20,
         pickable=True
     )
     text = pdk.Layer(
         "TextLayer",
-        data=df_user_path,
+        data=df_map,
         get_position="[lon, lat]",
-        get_text="Label",
-        get_size=10,
-        get_color=[255, 255, 255],
+        get_text="Email",
+        get_size=12,
+        get_color=[255, 255, 0],
         get_alignment_baseline='"bottom"'
     )
-    deck = pdk.Deck(
-        layers=[scatter, text],
-        initial_view_state=view,
-        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Time: {Timestamp}"}
-    )
-else:
-    df_display["Label"] = df_display["Email"]
-    scatter = pdk.Layer(
-        "ScatterplotLayer",
-        data=df_display,
-        get_position="[lon, lat]",
-        get_fill_color="[255, 165, 0]",
-        get_radius=40,
-        radius_scale=5,
-        radius_min_pixels=4,
-        radius_max_pixels=20,
-        pickable=True
-    )
-    text = pdk.Layer(
-        "TextLayer",
-        data=df_display,
-        get_position="[lon, lat]",
-        get_text="Label",
-        get_size=10,
-        get_color=[255, 255, 255],
-        get_alignment_baseline='"bottom"'
-    )
-    deck = pdk.Deck(
-        layers=[scatter, text],
-        initial_view_state=view,
-        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
+    line = pdk.Layer(
+        "LineLayer",
+        data=df_lines,
+        get_source_position=["start_lon", "start_lat"],
+        get_target_position=["end_lon", "end_lat"],
+        get_color=[0, 128, 255],
+        get_width=2
     )
 
-st.pydeck_chart(deck, use_container_width=True)
+    deck = pdk.Deck(
+        layers=[scatter, text, line],
+        initial_view_state=view,
+        tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}<br/>Distance: {Distance_km} km<br/>Mode: {Mode}<br/>SOS: {SOS}"}
+    )
+    st.pydeck_chart(deck, use_container_width=True, height=600)
+else:
+    st.info("No user data available yet.")
