@@ -96,20 +96,20 @@ def fetch_latest_locations():
 
 
 # ------------------------- UI -------------------------
-st.title("\U0001F4CD Multi-User Geolocation Tracker")
+st.title("📍 Multi-User Geolocation Tracker with SOS and Path Viewer")
 
 if "email" not in st.session_state:
     st.session_state["email"] = ""
 
 with st.sidebar:
-    st.header("\U0001F512 Settings")
+    st.header("🔒 Settings")
     email = st.text_input("Enter your email:", value=st.session_state["email"])
     st.session_state["email"] = email
     mode = st.radio("Privacy Mode", ["Public", "Private"])
     shared_code = st.text_input("Shared Code", value="group1" if mode == "Private" else "")
     show_public = st.checkbox("Also show public users", value=True)
-    sos = st.checkbox("\U0001F6A8 Emergency Mode (SOS)")
-    if st.button("\U0001F4CD Refresh My Location"):
+    sos = st.checkbox("🚨 Emergency Mode (SOS)")
+    if st.button("📍 Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
     origin_user = None
@@ -127,17 +127,26 @@ with st.sidebar:
         else:
             st.info("No active users found with the same Shared Code.")
 
-    show_path = st.checkbox("\U0001F5FA Show path for user (past 24 hours)")
+    show_path = st.checkbox("🗺 Show path for user (past 24 hours)")
     path_user = None
     if show_path:
         all_users = df_all["Email"].unique().tolist()
         path_user = st.selectbox("Select user for path", options=all_users)
 
-if mode == "Private" and origin_user:
-    user_row = df_active_users[df_active_users["Email"] == origin_user].iloc[0]
-    origin_lat, origin_lon = user_row["lat"], user_row["lon"]
-else:
-    origin_lat, origin_lon = default_origin()
+    # New: Map Style Selector
+    map_style = st.selectbox("🗺 Map Type", options=[
+        "light", "dark", "satellite", "streets", "outdoors"
+    ], index=0)
+
+mapbox_styles = {
+    "light": "mapbox://styles/mapbox/light-v11",
+    "dark": "mapbox://styles/mapbox/dark-v11",
+    "satellite": "mapbox://styles/mapbox/satellite-v9",
+    "streets": "mapbox://styles/mapbox/streets-v12",
+    "outdoors": "mapbox://styles/mapbox/outdoors-v12"
+}
+
+selected_map_style = mapbox_styles.get(map_style, "mapbox://styles/mapbox/light-v11")
 
 # Automatically get geolocation and log it every refresh
 data = streamlit_geolocation()
