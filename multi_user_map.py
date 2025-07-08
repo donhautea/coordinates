@@ -1,9 +1,9 @@
-
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import requests
 import gspread
+import random
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -19,7 +19,6 @@ st_autorefresh(interval=10 * 1000, key="auto_refresh")  # Refresh every 10 secon
 PH_TIMEZONE = ZoneInfo("Asia/Manila")
 geolocator = Nominatim(user_agent="geo_app")
 FILE_ID = st.secrets["gdrive"]["file_id"]
-pdk.settings.mapbox_api_key = st.secrets["mapbox"]["token"]
 
 # ------------------------- HELPERS -------------------------
 def default_origin():
@@ -87,30 +86,30 @@ def fetch_latest_locations():
         return pd.DataFrame()
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce").dt.tz_localize(PH_TIMEZONE)
     now = datetime.now(PH_TIMEZONE)
-    df = df[df["Timestamp"] > now - timedelta(hours=1)]
+    df = df[df["Timestamp"] > now - timedelta(hours=1)]  # Only include entries within the past 1 hour
     df["Age"] = now - df["Timestamp"]
     df["Active"] = df["Age"] < timedelta(minutes=15)
-    df["lat"] = pd.to_numeric(df["Latitude"], errors="coerce")
-    df["lon"] = pd.to_numeric(df["Longitude"], errors="coerce")
-    df = df.dropna(subset=["lat", "lon"])
+    df["lat"] = df["Latitude"]
+    df["lon"] = df["Longitude"]
     df.sort_values("Timestamp", ascending=True, inplace=True)
     return df
 
+
 # ------------------------- UI -------------------------
-st.title("📍 Multi-User Geolocation Tracker with SOS and Path Viewer")
+st.title("\U0001F4CD Multi-User Geolocation Tracker")
 
 if "email" not in st.session_state:
     st.session_state["email"] = ""
 
 with st.sidebar:
-    st.header("🔒 Settings")
+    st.header("\U0001F512 Settings")
     email = st.text_input("Enter your email:", value=st.session_state["email"])
     st.session_state["email"] = email
     mode = st.radio("Privacy Mode", ["Public", "Private"])
     shared_code = st.text_input("Shared Code", value="group1" if mode == "Private" else "")
     show_public = st.checkbox("Also show public users", value=True)
-    sos = st.checkbox("🚨 Emergency Mode (SOS)")
-    if st.button("📍 Refresh My Location"):
+    sos = st.checkbox("\U0001F6A8 Emergency Mode (SOS)")
+    if st.button("\U0001F4CD Refresh My Location"):
         st.session_state["streamlit_geolocation"] = None
 
     origin_user = None
@@ -128,31 +127,19 @@ with st.sidebar:
         else:
             st.info("No active users found with the same Shared Code.")
 
-    show_path = st.checkbox("🗺 Show path for user (past 24 hours)")
+    show_path = st.checkbox("\U0001F5FA Show path for user (past 24 hours)")
     path_user = None
     if show_path:
         all_users = df_all["Email"].unique().tolist()
         path_user = st.selectbox("Select user for path", options=all_users)
 
-    map_style = st.selectbox("🗺 Map Type", options=[
-        "light", "dark", "satellite", "streets", "outdoors"
-    ], index=0)
+if mode == "Private" and origin_user:
+    user_row = df_active_users[df_active_users["Email"] == origin_user].iloc[0]
+    origin_lat, origin_lon = user_row["lat"], user_row["lon"]
+else:
+    origin_lat, origin_lon = default_origin()
 
-mapbox_styles = {
-    "light": "mapbox://styles/mapbox/light-v11",
-    "dark": "mapbox://styles/mapbox/dark-v11",
-    "satellite": "mapbox://styles/mapbox/satellite-v9",
-    "streets": "mapbox://styles/mapbox/streets-v12",
-    "outdoors": "mapbox://styles/mapbox/outdoors-v12"
-}
-selected_map_style = mapbox_styles.get(map_style, "mapbox://styles/mapbox/light-v11")
-
-origin_lat, origin_lon = default_origin()
-if origin_user:
-    origin_row = df_all[df_all["Email"] == origin_user].sort_values("Timestamp", ascending=False)
-    if not origin_row.empty:
-        origin_lat, origin_lon = origin_row.iloc[0][["lat", "lon"]]
-
+# Automatically get geolocation and log it every refresh
 data = streamlit_geolocation()
 
 if data and email:
@@ -174,11 +161,12 @@ if data and email:
         }
         append_to_sheet(record)
         with st.sidebar:
-            st.markdown(f"📍 **Your Coordinates:** `{lat}, {lon}`")
-            st.markdown(f"📏 **Distance to Origin:** `{distance_km} km`")
+            st.markdown(f"\U0001F9ED **Your Coordinates:** `{lat}, {lon}`")
+            st.markdown(f"\U0001F4CD **Distance to Origin:** `{distance_km} km`")
 
-# View filtering logic
+# Display map according to filtering logic
 view_data = fetch_latest_locations()
+
 if mode == "Private" and shared_code:
     view_data = view_data[
         ((view_data["Mode"] == "Private") & (view_data["SharedCode"] == shared_code)) |
@@ -190,18 +178,8 @@ elif mode == "Public":
 else:
     view_data = view_data.iloc[0:0]
 
-# Fallback if empty
-if view_data.empty:
-    st.warning("⚠️ No valid coordinates to show. Adding dummy marker at origin for verification.")
-    view_data = pd.DataFrame([{
-        "Email": "No Active Users",
-        "lat": origin_lat,
-        "lon": origin_lon
-    }])
-
+# Build and show map
 view_data["Label"] = view_data["Email"]
-
-# Build map layers
 scatter = pdk.Layer(
     "ScatterplotLayer",
     data=view_data,
@@ -223,17 +201,52 @@ text = pdk.Layer(
     get_alignment_baseline='"bottom"'
 )
 
-view = pdk.ViewState(
-    latitude=view_data["lat"].iloc[-1],
-    longitude=view_data["lon"].iloc[-1],
-    zoom=14
-)
+# View focus
+if email in view_data["Email"].values:
+    user_latest = view_data[view_data["Email"] == email].sort_values("Timestamp", ascending=False).iloc[0]
+    view = pdk.ViewState(latitude=user_latest["lat"], longitude=user_latest["lon"], zoom=14)
+else:
+    view = pdk.ViewState(latitude=origin_lat, longitude=origin_lon, zoom=12)
 
 layers = [scatter, text]
 
+# Path display logic
+if show_path and path_user:
+    now = datetime.now(PH_TIMEZONE)
+    df_user_path = fetch_latest_locations()
+    df_user_path = df_user_path[(df_user_path["Email"] == path_user) & (df_user_path["Timestamp"] > now - timedelta(hours=24))].copy()
+    df_user_path.sort_values("Timestamp", inplace=True)
+    df_user_path["Color"] = [
+        [150, 150, 150, 100] if i < len(df_user_path)-1 else [255, 0, 0, 255] 
+        for i in range(len(df_user_path))
+    ]
+    df_user_path["Label"] = df_user_path["Email"]
+
+    path_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_user_path,
+        get_position="[lon, lat]",
+        get_fill_color="Color",
+        get_radius=40,
+        radius_scale=5,
+        radius_min_pixels=4,
+        radius_max_pixels=20,
+        pickable=True
+    )
+    text_layer = pdk.Layer(
+        "TextLayer",
+        data=df_user_path,
+        get_position="[lon, lat]",
+        get_text="Label",
+        get_size=10,
+        get_color=[255, 255, 255],
+        get_alignment_baseline='"bottom"'
+    )
+    layers = [*layers, path_layer, text_layer]
+
+# Render the map
 st.pydeck_chart(pdk.Deck(
     layers=layers,
     initial_view_state=view,
-    map_style=selected_map_style,
     tooltip={"html": "<b>{Email}</b><br/>Lat: {lat}<br/>Lon: {lon}"}
 ), use_container_width=True)
